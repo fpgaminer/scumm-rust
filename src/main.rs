@@ -523,6 +523,12 @@ mod tests {
 					assert_eq!(verb.name, "vTwo");
 					let body = verb.body.as_ref().unwrap();
 					assert_eq!(body.statements.len(), 1);
+					if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &body.statements[0] {
+						assert_eq!(fc.name, "call");
+						assert!(fc.arguments.is_empty());
+					} else {
+						panic!("expected call() inside verb body");
+					}
 				} else {
 					panic!("expected verb statement with body");
 				}
@@ -549,6 +555,10 @@ mod tests {
 				} else {
 					panic!("expected function call inside while");
 				}
+				if let Expression::Primary(Primary::Number(1)) = w.condition {
+				} else {
+					panic!("expected numeric condition");
+				}
 			} else {
 				panic!("expected while statement");
 			}
@@ -570,10 +580,33 @@ mod tests {
 		if let TopLevel::Script(script) = &ast[0] {
 			if let Statement::If(stmt) = &script.body.statements[0] {
 				assert!(stmt.else_block.is_some());
-				if let Expression::Equality(_, op, _) = &stmt.condition {
+				if let Expression::Equality(left, op, right) = &stmt.condition {
 					assert_eq!(*op, EqualityOp::Equal);
+					if let Expression::Primary(Primary::Identifier(id)) = &**left {
+						assert_eq!(id, "cond");
+					} else {
+						panic!("expected identifier left operand");
+					}
+					if let Expression::Primary(Primary::Number(1)) = &**right {
+					} else {
+						panic!("expected numeric right operand");
+					}
 				} else {
 					panic!("expected equality condition");
+				}
+				let then_block = &stmt.then_block;
+				assert_eq!(then_block.statements.len(), 1);
+				if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &then_block.statements[0] {
+					assert_eq!(fc.name, "a");
+				} else {
+					panic!("expected call to a() in then block");
+				}
+				let else_block = stmt.else_block.as_ref().unwrap();
+				assert_eq!(else_block.statements.len(), 1);
+				if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &else_block.statements[0] {
+					assert_eq!(fc.name, "b");
+				} else {
+					panic!("expected call to b() in else block");
 				}
 			} else {
 				panic!("expected if statement");
@@ -593,6 +626,12 @@ mod tests {
 				assert_eq!(var.name, "code");
 				if let Expression::Primary(Primary::FunctionCall(fc)) = &var.value {
 					assert_eq!(fc.name, "prompt");
+					assert_eq!(fc.arguments.len(), 1);
+					if let Expression::Primary(Primary::String(s)) = &fc.arguments[0] {
+						assert_eq!(s, "\"hi\"");
+					} else {
+						panic!("expected string argument");
+					}
 				} else {
 					panic!("expected function call");
 				}
@@ -629,6 +668,18 @@ mod tests {
 		if let TopLevel::Class(class) = &ast[0] {
 			assert_eq!(class.name, "C");
 			assert_eq!(class.body.statements.len(), 1);
+			if let Statement::Verb(verb) = &class.body.statements[0] {
+				assert_eq!(verb.name, "vRun");
+				let body = verb.body.as_ref().expect("verb body");
+				assert_eq!(body.statements.len(), 1);
+				if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &body.statements[0] {
+					assert_eq!(fc.name, "run");
+				} else {
+					panic!("expected run() call in verb");
+				}
+			} else {
+				panic!("expected verb statement");
+			}
 		} else {
 			panic!("expected class");
 		}
@@ -643,13 +694,22 @@ mod tests {
 		if let TopLevel::Script(script) = &ast[0] {
 			if let Statement::If(stmt) = &script.body.statements[0] {
 				if let Expression::LogicalAnd(left, right) = &stmt.condition {
-					// left should be a function call
 					if let Expression::Primary(Primary::FunctionCall(fc)) = &**left {
 						assert_eq!(fc.name, "a");
 					} else {
 						panic!("expected function call");
 					}
-					if let Expression::Equality(_, EqualityOp::Equal, _) = &**right {
+					if let Expression::Equality(l, EqualityOp::Equal, r) = &**right {
+						if let Expression::Primary(Primary::Identifier(id)) = &**l {
+							assert_eq!(id, "b");
+						} else {
+							panic!("expected identifier left of equality");
+						}
+						if let Expression::Primary(Primary::Identifier(id)) = &**r {
+							assert_eq!(id, "c");
+						} else {
+							panic!("expected identifier right of equality");
+						}
 					} else {
 						panic!("expected equality");
 					}
@@ -692,7 +752,15 @@ mod tests {
 					} else {
 						panic!("expected number")
 					}
-					if let Expression::Factor(_, FactorOp::Multiply, _) = **right {
+					if let Expression::Factor(f_left, FactorOp::Multiply, f_right) = &**right {
+						if matches!(&**f_left, Expression::Primary(Primary::Number(4))) {
+						} else {
+							panic!("expected number 4");
+						}
+						if matches!(&**f_right, Expression::Primary(Primary::Number(5))) {
+						} else {
+							panic!("expected number 5");
+						}
 					} else {
 						panic!("expected multiply")
 					}
@@ -718,6 +786,18 @@ mod tests {
 			if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &script.body.statements[0] {
 				assert_eq!(fc.name, "call");
 				assert_eq!(fc.arguments.len(), 3);
+				if let Expression::Primary(Primary::Number(1)) = fc.arguments[0] {
+				} else {
+					panic!("expected first argument 1");
+				}
+				if let Expression::Primary(Primary::Number(2)) = fc.arguments[1] {
+				} else {
+					panic!("expected second argument 2");
+				}
+				if let Expression::Primary(Primary::Number(3)) = fc.arguments[2] {
+				} else {
+					panic!("expected third argument 3");
+				}
 			} else {
 				panic!("expected function call");
 			}
@@ -734,6 +814,10 @@ mod tests {
 			if let Statement::State(state) = &obj.body.statements[0] {
 				assert_eq!(state.number, 1);
 				assert_eq!(state.assignments.len(), 2);
+				assert_eq!(state.assignments[0].0, "a");
+				assert_eq!(state.assignments[0].1, Primary::Number(1));
+				assert_eq!(state.assignments[1].0, "b");
+				assert_eq!(state.assignments[1].1, Primary::Number(2));
 			} else {
 				panic!("expected state statement");
 			}

@@ -466,10 +466,14 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ast::EqualityOp;
+	use crate::ast::{EqualityOp, FactorOp, PropertyValue, TermOp};
 
 	fn parse_ok(src: &str) -> Vec<TopLevel> {
 		parse_str(src).expect("parse failed")
+	}
+
+	fn parse_err(src: &str) {
+		assert!(parse_str(src).is_err());
 	}
 
 	#[test]
@@ -668,5 +672,109 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn property_assignment() {
+		let src = r#"object O "o" {
+    initialRoom 0;
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Object(obj) = &ast[0] {
+			if let Statement::PropertyAssignment(prop) = &obj.body.statements[0] {
+				assert_eq!(prop.name, "initialRoom");
+				assert_eq!(prop.value, PropertyValue::Number(0));
+			} else {
+				panic!("expected property assignment");
+			}
+		} else {
+			panic!("expected object");
+		}
+	}
+
+	#[test]
+	fn arithmetic_precedence() {
+		let src = r#"script S {
+    a = 3 + 4 * 5;
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			if let Statement::Expression(Expression::Assignment(_, expr)) = &script.body.statements[0] {
+				if let Expression::Term(left, op, right) = &**expr {
+					assert_eq!(*op, TermOp::Add);
+					if let Expression::Primary(Primary::Number(3)) = **left {
+					} else {
+						panic!("expected number")
+					}
+					if let Expression::Factor(_, FactorOp::Multiply, _) = **right {
+					} else {
+						panic!("expected multiply")
+					}
+				} else {
+					panic!("expected term expression");
+				}
+			} else {
+				panic!("expected assignment expression");
+			}
+		} else {
+			panic!("expected script");
+		}
+	}
+
+	#[test]
+	fn function_call_arguments() {
+		let src = r#"script S {
+    call(1, 2, 3);
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &script.body.statements[0] {
+				assert_eq!(fc.name, "call");
+				assert_eq!(fc.arguments.len(), 3);
+			} else {
+				panic!("expected function call");
+			}
+		}
+	}
+
+	#[test]
+	fn multi_state_assignments() {
+		let src = r#"object O "o" {
+    state 1 a=1 b=2;
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Object(obj) = &ast[0] {
+			if let Statement::State(state) = &obj.body.statements[0] {
+				assert_eq!(state.number, 1);
+				assert_eq!(state.assignments.len(), 2);
+			} else {
+				panic!("expected state statement");
+			}
+		}
+	}
+
+	#[test]
+	fn parse_example_script() {
+		let src = include_str!("../example.sc");
+		let ast = parse_ok(src);
+		assert!(!ast.is_empty());
+	}
+
+	#[test]
+	fn invalid_missing_semicolon() {
+		let src = "script S { string a = 1 }";
+		parse_err(src);
+	}
+
+	#[test]
+	fn invalid_object_syntax() {
+		let src = "object O { }";
+		parse_err(src);
+	}
+
+	#[test]
+	fn invalid_unclosed_block() {
+		let src = "script S {";
+		parse_err(src);
 	}
 }

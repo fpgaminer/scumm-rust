@@ -26,6 +26,18 @@ use std::{
 use crate::ast::*;
 
 // ---------------------------------------------------------------------------
+// Runtime object definition (built from the AST once at start-up)
+// ---------------------------------------------------------------------------
+struct ObjectDef<'a> {
+	id: i32,
+	name: String,                      // human readable name
+	verbs: HashMap<String, &'a Block>, // vLook, vOpen, …
+	init_room: i32,                    // 0 = nowhere / inventory only
+	init_state: u32,
+}
+
+
+// ---------------------------------------------------------------------------
 // Dynamic value type
 // ---------------------------------------------------------------------------
 
@@ -143,6 +155,8 @@ pub struct Interpreter<'a> {
 	scripts: HashMap<String, &'a Script>,
 	consts: HashMap<String, Value>,
 	world: World,
+	objects: HashMap<i32, ObjectDef<'a>>, // id → def
+	object_names: HashMap<String, i32>,   // lowercase name → id  (for parser)
 }
 
 impl<'a> Interpreter<'a> {
@@ -180,6 +194,113 @@ impl<'a> Interpreter<'a> {
 			}
 		}
 
+		// ------------------------------------------------------------------
+		// pass 1b – harvest every class’ verbs so we can attach them to
+		//           objects that declare `class  <name>;` later on
+		// ------------------------------------------------------------------
+		let mut class_verbs: HashMap<String, HashMap<String, &'a Block>> = HashMap::new();
+
+		for tl in ast {
+			if let TopLevel::Class(c) = tl {
+				let mut vmap = HashMap::new();
+				for st in &c.body.statements {
+					if let Statement::Verb(v) = st {
+						if let Some(body) = &v.body {
+							vmap.insert(v.name.clone(), body);   // <-- NO extra ‘v’
+						}
+					}
+				}
+				class_verbs.insert(c.name.clone(), vmap);
+			}
+		}
+
+
+		let mut objects = HashMap::new();
+		let mut object_names = HashMap::new();
+
+		for tl in ast {
+			if let TopLevel::Object(o) = tl {
+				// Resolve numeric id ⇒ the identifier *must* be in the #define table
+				let id_num = match consts.get(&o.id) {
+					Some(Value::Number(n)) => *n,
+					_ => {
+						eprintln!("[warn] object id {} has no #define – using 0", o.id);
+						0
+					},
+				};
+
+				let mut verbs = HashMap::new();
+				let mut declared_classes = Vec::new();
+				let mut init_room = 0;
+				let mut init_state = 0;
+				let mut has_init_room = false;
+
+				for st in &o.body.statements {
+					match st {
+						Statement::Verb(v) if v.body.is_some() => {
+							verbs.insert(v.name.clone(), v.body.as_ref().unwrap());
+						},
+						Statement::PropertyAssignment(p) if p.name == "initialRoom" => {
+							init_room = match &p.value {
+								PropertyValue::Number(n) => *n as i32,
+								PropertyValue::Identifier(ident) => consts
+									.get(ident)
+									.and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
+									.unwrap_or(0),
+								_ => 0,
+							};
+							has_init_room = true;
+						},
+						Statement::ClassDeclaration(name) => declared_classes.push(name.clone()),
+						Statement::State(s) => init_state = s.number,
+						_ => {},
+					}
+				}
+
+				/* -------- bring in verbs from each declared class -------- */
+				for cname in declared_classes {
+					if let Some(cverbs) = class_verbs.get(&cname) {
+						for (vname, block) in cverbs {
+							// object-level verb overrides class verb with same name
+							verbs.entry(vname.clone()).or_insert(*block);
+						}
+					} else {
+						eprintln!("[warn] class '{}' not found", cname);
+					}
+				}
+
+				if !has_init_room {
+					// use #define ROOM_ID if present, otherwise fall back to 1
+					init_room = consts
+						.get("ROOM_ID")
+						.and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
+						.unwrap_or(1);
+				}
+
+				let def = ObjectDef {
+					id: id_num,
+					name: o.name.trim_matches('"').to_owned(),
+					verbs,
+					init_room,
+					init_state,
+				};
+				objects.insert(id_num, def);
+			}
+		}
+
+		let mut world = World::default();
+		for (id, def) in &objects {
+			if def.init_room != 0 {
+				world.object_room.insert(*id, def.init_room);
+			}
+			world.object_state.insert(*id, def.init_state);
+		}
+
+		// build reverse lookup for the command parser
+		for (id, def) in &objects {
+			object_names.insert(def.name.to_lowercase(), *id);
+		}
+
 		// Spawn script with ID 1 (ROOM_ID) as entry point, or fallback to first script
 		let mut tasks = VecDeque::new();
 
@@ -204,7 +325,9 @@ impl<'a> Interpreter<'a> {
 			builtins: HashMap::new(),
 			scripts,
 			consts,
-			world: World::default(),
+			world,
+			objects,
+			object_names,
 		};
 		this.install_builtins();
 		this
@@ -397,32 +520,121 @@ impl<'a> Interpreter<'a> {
 	// Run until no runnable tasks remain
 	// --------------------------------------------------
 	pub fn run(&mut self) {
-		while let Some(mut task) = self.tasks.pop_front() {
-			if task.delay > 0 {
-				task.delay -= 1;
-				self.tasks.push_back(task);
-				continue;
-			}
+		// The entry script may have changed the room already
+		if self.world.current_room == 0 {
+			self.world.current_room = 1;
+		}
 
-			let stmt_ref = match task.next() {
-				Some(s) => s,
-				None => continue, // finished
-			};
-			let action = self.exec_stmt(stmt_ref, &mut task);
-			task.ip += 1; // advance before splicing
+		loop {
+			//---------------------------------------------------------------
+			// 1) run each runnable task *once* (co-operative multitasking)
+			//---------------------------------------------------------------
+			let mut n = self.tasks.len();
+			while n > 0 {
+				let mut task = self.tasks.pop_front().unwrap();
+				n -= 1;
 
-			// apply queued splice action
-			if let Action::Splice { at, items } = action {
-				for (i, s) in items.into_iter().enumerate() {
-					task.stmts.insert(at + i, s);
+				if task.delay > 0 {
+					task.delay -= 1;
+					self.tasks.push_back(task);
+					continue;
+				}
+
+				let stmt_ref = match task.next() {
+					Some(s) => s,
+					None => continue,
+				};
+				let act = self.exec_stmt(stmt_ref, &mut task);
+				task.ip += 1;
+				if let Action::Splice { at, items } = act {
+					for (i, s) in items.into_iter().enumerate() {
+						task.stmts.insert(at + i, s);
+					}
+				}
+				if task.ip < task.stmts.len() {
+					self.tasks.push_back(task);
 				}
 			}
 
-			if task.ip < task.stmts.len() {
-				self.tasks.push_back(task);
+			//---------------------------------------------------------------
+			// 2) if no script produced output this tick, ask the player
+			//---------------------------------------------------------------
+			self.describe_room();
+			let Some(line) = read_player_command() else { break };
+			if line.is_empty() {
+				continue;
+			}
+			if line == "quit" {
+				println!("Bye!");
+				break;
+			}
+			if line == "inventory" {
+				if self.world.inventory.is_empty() {
+					println!("Your pockets are empty.");
+				} else {
+					println!("You are carrying:");
+					for id in &self.world.inventory {
+						if let Some(def) = self.objects.get(id) {
+							println!(" – {}", def.name);
+						}
+					}
+				}
+				continue;
+			}
+			let words: Vec<&str> = line.split_whitespace().collect();
+			if words.is_empty() {
+				continue;
+			}
+
+			// single-verb commands ----------------------------------------
+			let verb_word = words[0];
+			let verb_name = user_verb_to_scumm(verb_word);
+			if verb_name.is_empty() {
+				println!("I don’t understand.");
+				continue;
+			}
+
+			// pick <obj> or look <obj> etc.  “use key on door” -------------
+			let rest = &words[1..];
+			if rest.is_empty() {
+				println!("{} what?", verb_word);
+				continue;
+			}
+
+			// detect “on/with” to support 2-object USE
+			let split_at = rest.iter().position(|w| *w == "on" || *w == "with");
+			let (obj_words, tgt_words) = match split_at {
+				Some(pos) => (&rest[..pos], &rest[pos + 1..]),
+				None => (rest, &[][..]),
+			};
+			let obj_name = obj_words.join(" ");
+			let obj_id = *self.object_names.get(&obj_name).unwrap_or(&0);
+			if obj_id == 0 {
+				println!("There is no '{}' here.", obj_name);
+				continue;
+			}
+			let tgt_id = if !tgt_words.is_empty() {
+				let name = tgt_words.join(" ");
+				*self.object_names.get(&name).unwrap_or(&0)
+			} else {
+				0
+			};
+
+			// finally: run the verb ---------------------------------------
+			if tgt_id != 0 {
+				// try the first object (obj_id) first …
+				if !self.run_verb(obj_id, verb_name, Some(tgt_id)) {
+					// … fallback to the second if the first has no such verb
+					if !self.run_verb(tgt_id, verb_name, Some(obj_id)) {
+						println!("{} {} on {}? I don’t know how to do that.", verb_word, obj_name, tgt_words.join(" "));
+					}
+				}
+			} else {
+				self.run_verb(obj_id, verb_name, None);
 			}
 		}
 	}
+
 
 	// --------------------------------------------------
 	// Execute a single statement, returning structural changes
@@ -573,6 +785,44 @@ impl<'a> Interpreter<'a> {
 			},
 		}
 	}
+
+	fn run_verb(&mut self, obj_id: i32, verb: &str, maybe_target: Option<i32>) -> bool {
+		if let Some(def) = self.objects.get(&obj_id) {
+			if let Some(block) = def.verbs.get(verb) {
+				let mut t = Task::new(block);
+				t.env.set("this".into(), Value::Number(obj_id));
+				if let Some(tgt) = maybe_target {
+					t.env.set("verbObj".into(), Value::Number(tgt));
+				}
+				self.tasks.push_back(t);
+				return true;            // ――― found & queued
+			}
+		}
+		false                             // ――― no such verb here
+	}
+
+
+	fn describe_room(&self) {
+		println!();
+		println!("You are in room {}.", self.world.current_room);
+		let here: Vec<&ObjectDef> = self
+			.objects
+			.values()
+			.filter(|o| self.world.object_room.get(&o.id) == Some(&self.world.current_room))
+			.collect();
+		if here.is_empty() {
+			println!("Nothing of interest here.");
+		} else {
+			print!("You see: ");
+			for (i, o) in here.iter().enumerate() {
+				if i > 0 {
+					print!(", ");
+				}
+				print!("{}", o.name);
+			}
+			println!(".");
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -582,4 +832,29 @@ impl<'a> Interpreter<'a> {
 pub fn run_scripts(ast: &[TopLevel]) {
 	let mut i = Interpreter::new(ast);
 	i.run();
+}
+
+
+fn user_verb_to_scumm(cmd: &str) -> &'static str {
+	match cmd {
+		"look" | "examine" => "vLook",
+		"open" => "vOpen",
+		"close" => "vClose",
+		"use" => "vUse",
+		"read" => "vRead",
+		"take" | "get" | "pickup" => "vPickUp",
+		_ => "",
+	}
+}
+
+
+fn read_player_command() -> Option<String> {
+	print!(">> ");
+	io::stdout().flush().ok()?;
+	let mut buf = String::new();
+	if io::stdin().read_line(&mut buf).is_ok() {
+		Some(buf.trim().to_lowercase())
+	} else {
+		None
+	}
 }

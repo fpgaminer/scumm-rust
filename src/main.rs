@@ -250,7 +250,12 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 fn parse_primary(pair: Pair<Rule>) -> Primary {
 	match pair.as_rule() {
 		Rule::number => Primary::Number(pair.as_str().parse().unwrap_or(0)),
-		Rule::string => Primary::String(pair.as_str().to_string()),
+		Rule::string => {
+            let raw = pair.as_str();
+            // remove the leading and trailing "   (grammar guarantees they exist)
+            let inner = &raw[1..raw.len() - 1];
+            Primary::String(inner.to_string())
+        },
 		Rule::identifier => Primary::Identifier(pair.as_str().to_string()),
 		Rule::func_call => {
 			let mut inner = pair.into_inner();

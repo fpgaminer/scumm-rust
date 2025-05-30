@@ -22,3 +22,20 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
   
+  clippy:
+    name: Check for linting errors
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --all-features -- -D warnings
+  
+  test:
+    name: Run test suite
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-features

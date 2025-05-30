@@ -1,4 +1,5 @@
 mod ast;
+mod interpreter;
 mod preprocessor;
 
 use anyhow::{Context, Result};
@@ -446,6 +447,9 @@ fn main() -> Result<()> {
 	}
 
 	println!("Parsed successfully! AST nodes: {:#?}", ast_nodes);
+
+	interpreter::run_scripts(&ast_nodes);
+
 	Ok(())
 }
 

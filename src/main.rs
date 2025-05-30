@@ -126,7 +126,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 		Rule::logical_or => {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
-			
+
 			// Each remaining pair is another logical_and expression to OR with
 			for right_pair in inner {
 				let right_expr = parse_expression(right_pair);
@@ -137,7 +137,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 		Rule::logical_and => {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
-			
+
 			// Each remaining pair is another equality expression to AND with
 			for right_pair in inner {
 				let right_expr = parse_expression(right_pair);
@@ -148,7 +148,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 		Rule::equality => {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
-			
+
 			// Each remaining pair is another comparison to compare with using ==
 			// The equality rule only supports == for now (we'd need to modify grammar for !=)
 			for right_pair in inner {
@@ -160,14 +160,14 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 		Rule::comparison => {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
-			
+
 			// Process remaining pairs in groups: operator, operand, operator, operand, ...
 			let remaining: Vec<_> = inner.collect();
 			let mut i = 0;
 			while i + 1 < remaining.len() {
 				let op_str = remaining[i].as_str();
 				let right_expr = parse_expression(remaining[i + 1].clone());
-				
+
 				let op = match op_str {
 					"<" => ast::ComparisonOp::Less,
 					">" => ast::ComparisonOp::Greater,
@@ -175,7 +175,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 					">=" => ast::ComparisonOp::GreaterEqual,
 					_ => ast::ComparisonOp::Less, // fallback
 				};
-				
+
 				expr = Expression::Comparison(Box::new(expr), op, Box::new(right_expr));
 				i += 2;
 			}
@@ -184,20 +184,20 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 		Rule::term => {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
-			
+
 			// Process remaining pairs in groups: operator, operand, operator, operand, ...
 			let remaining: Vec<_> = inner.collect();
 			let mut i = 0;
 			while i + 1 < remaining.len() {
 				let op_str = remaining[i].as_str();
 				let right_expr = parse_expression(remaining[i + 1].clone());
-				
+
 				let op = match op_str {
 					"+" => ast::TermOp::Add,
 					"-" => ast::TermOp::Subtract,
 					_ => ast::TermOp::Add, // fallback
 				};
-				
+
 				expr = Expression::Term(Box::new(expr), op, Box::new(right_expr));
 				i += 2;
 			}
@@ -206,20 +206,20 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 		Rule::factor => {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
-			
+
 			// Process remaining pairs in groups: operator, operand, operator, operand, ...
 			let remaining: Vec<_> = inner.collect();
 			let mut i = 0;
 			while i + 1 < remaining.len() {
 				let op_str = remaining[i].as_str();
 				let right_expr = parse_expression(remaining[i + 1].clone());
-				
+
 				let op = match op_str {
 					"*" => ast::FactorOp::Multiply,
 					"/" => ast::FactorOp::Divide,
 					_ => ast::FactorOp::Multiply, // fallback
 				};
-				
+
 				expr = Expression::Factor(Box::new(expr), op, Box::new(right_expr));
 				i += 2;
 			}
@@ -229,7 +229,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			let inner = pair.into_inner();
 			let mut ops = Vec::new();
 			let mut expr_pair = None;
-			
+
 			for pair in inner {
 				match pair.as_str() {
 					"!" => ops.push(ast::UnaryOp::Not),
@@ -237,18 +237,18 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 					_ => expr_pair = Some(pair),
 				}
 			}
-			
+
 			let mut expr = if let Some(ep) = expr_pair {
 				Expression::Primary(parse_primary(ep))
 			} else {
 				Expression::Primary(Primary::Number(0))
 			};
-			
+
 			// Apply unary operators from right to left
 			for op in ops.into_iter().rev() {
 				expr = Expression::Unary(op, Box::new(expr));
 			}
-			
+
 			expr
 		},
 		Rule::primary => Expression::Primary(parse_primary(pair)),
@@ -298,6 +298,75 @@ fn parse_primary(pair: Pair<Rule>) -> Primary {
 	}
 }
 
+pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
+	let pairs = ScummParser::parse(Rule::file, input)?;
+	let mut ast_nodes = Vec::new();
+
+	for pair in pairs {
+		if pair.as_rule() == Rule::file {
+			for inner_pair in pair.into_inner() {
+				match inner_pair.as_rule() {
+					Rule::directive => {
+						let mut inner = inner_pair.into_inner();
+						let name = inner.next().unwrap().as_str().to_string();
+						let value = inner.next().map(|p| p.as_str().trim().to_string()).unwrap_or_default();
+						ast_nodes.push(TopLevel::Directive(name, value));
+					},
+					Rule::item => {
+						for item_pair in inner_pair.into_inner() {
+							match item_pair.as_rule() {
+								Rule::script_def => {
+									let mut script_inner = item_pair.into_inner();
+									let name_pair = script_inner.next().unwrap();
+									let name = match name_pair.as_str().parse::<u32>() {
+										Ok(num) => ScriptName::Number(num),
+										Err(_) => ScriptName::Identifier(name_pair.as_str().to_string()),
+									};
+
+									let body = if let Some(block_pair) = script_inner.next() {
+										parse_block(block_pair)
+									} else {
+										Block { statements: Vec::new() }
+									};
+
+									ast_nodes.push(TopLevel::Script(Script { name, body }));
+								},
+								Rule::object_def => {
+									let mut object_inner = item_pair.into_inner();
+									let id = object_inner.next().unwrap().as_str().to_string();
+									let name = object_inner.next().unwrap().as_str().to_string();
+									let body = if let Some(block_pair) = object_inner.next() {
+										parse_block(block_pair)
+									} else {
+										Block { statements: Vec::new() }
+									};
+
+									ast_nodes.push(TopLevel::Object(Object { id, name, body }));
+								},
+								Rule::class_def => {
+									let mut class_inner = item_pair.into_inner();
+									let name = class_inner.next().unwrap().as_str().to_string();
+									let body = if let Some(block_pair) = class_inner.next() {
+										parse_block(block_pair)
+									} else {
+										Block { statements: Vec::new() }
+									};
+
+									ast_nodes.push(TopLevel::Class(Class { name, body }));
+								},
+								_ => {},
+							}
+						}
+					},
+					Rule::EOI => {},
+					_ => {},
+				}
+			}
+		}
+	}
+
+	Ok(ast_nodes)
+}
 
 fn main() -> Result<()> {
 	let filename = env::args().nth(1).context("Usage: scummc_compiler <file.sc>")?;
@@ -396,4 +465,212 @@ fn main() -> Result<()> {
 
 	println!("Parsed successfully! AST nodes: {:#?}", ast_nodes);
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::ast::EqualityOp;
+
+	fn parse_ok(src: &str) -> Vec<TopLevel> {
+		parse_str(src).expect("parse failed")
+	}
+
+	#[test]
+	fn directive_parsing() {
+		let ast = parse_ok("#define FOO 1\n");
+		assert_eq!(ast, vec![TopLevel::Directive("define".to_string(), "FOO 1".to_string())]);
+	}
+
+	#[test]
+	fn script_name_identifier() {
+		let ast = parse_ok("script ROOM { }\n");
+		assert_eq!(
+			ast,
+			vec![TopLevel::Script(Script {
+				name: ScriptName::Identifier("ROOM".to_string()),
+				body: Block { statements: vec![] },
+			})]
+		);
+	}
+
+	#[test]
+	fn script_name_number() {
+		let ast = parse_ok("script 5 { }\n");
+		assert_eq!(
+			ast,
+			vec![TopLevel::Script(Script {
+				name: ScriptName::Number(5),
+				body: Block { statements: vec![] },
+			})]
+		);
+	}
+
+	#[test]
+	fn object_with_verbs() {
+		let src = r#"object OBJ "Name" {
+    class Cls;
+    verb vOne;
+    verb vTwo {
+        call();
+    }
+}"#;
+		let ast = parse_ok(src);
+
+		assert_eq!(ast.len(), 1);
+		match &ast[0] {
+			TopLevel::Object(obj) => {
+				assert_eq!(obj.id, "OBJ");
+				assert_eq!(obj.name, "\"Name\"");
+				assert_eq!(obj.body.statements.len(), 3);
+
+				matches!(obj.body.statements[0], Statement::ClassDeclaration(_));
+
+				if let Statement::VerbStatement(ref verb) = obj.body.statements[1] {
+					assert_eq!(verb.name, "vOne");
+					assert!(verb.body.is_none());
+				} else {
+					panic!("expected verb statement");
+				}
+
+				if let Statement::VerbStatement(ref verb) = obj.body.statements[2] {
+					assert_eq!(verb.name, "vTwo");
+					let body = verb.body.as_ref().unwrap();
+					assert_eq!(body.statements.len(), 1);
+				} else {
+					panic!("expected verb statement with body");
+				}
+			},
+			_ => panic!("expected object"),
+		}
+	}
+
+	#[test]
+	fn while_loop() {
+		let src = r#"script S {
+    while (1) {
+        call();
+    }
+}"#;
+		let ast = parse_ok(src);
+
+		if let TopLevel::Script(script) = &ast[0] {
+			assert_eq!(script.body.statements.len(), 1);
+			if let Statement::While(w) = &script.body.statements[0] {
+				assert_eq!(w.body.statements.len(), 1);
+				if let Statement::Expression(Expression::Primary(Primary::FunctionCall(fc))) = &w.body.statements[0] {
+					assert_eq!(fc.name, "call");
+				} else {
+					panic!("expected function call inside while");
+				}
+			} else {
+				panic!("expected while statement");
+			}
+		} else {
+			panic!("expected script");
+		}
+	}
+
+	#[test]
+	fn if_else_condition() {
+		let src = r#"script S {
+    if (cond == 1) {
+        a();
+    } else {
+        b();
+    }
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			if let Statement::If(stmt) = &script.body.statements[0] {
+				assert!(stmt.else_block.is_some());
+				if let Expression::Equality(_, op, _) = &stmt.condition {
+					assert_eq!(*op, EqualityOp::Equal);
+				} else {
+					panic!("expected equality condition");
+				}
+			} else {
+				panic!("expected if statement");
+			}
+		}
+	}
+
+	#[test]
+	fn variable_declaration() {
+		let src = r#"script S {
+    string code = prompt("hi");
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			if let Statement::VariableDeclaration(var) = &script.body.statements[0] {
+				assert_eq!(var.var_type, "string");
+				assert_eq!(var.name, "code");
+				if let Expression::Primary(Primary::FunctionCall(fc)) = &var.value {
+					assert_eq!(fc.name, "prompt");
+				} else {
+					panic!("expected function call");
+				}
+			} else {
+				panic!("expected variable declaration");
+			}
+		}
+	}
+
+	#[test]
+	fn state_statement() {
+		let src = r#"object OBJ "o" {
+    state 0 open=1;
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Object(obj) = &ast[0] {
+			if let Statement::StateStatement(state) = &obj.body.statements[0] {
+				assert_eq!(state.number, 0);
+				assert_eq!(state.assignments.len(), 1);
+				assert_eq!(state.assignments[0].0, "open");
+				assert_eq!(state.assignments[0].1, Primary::Number(1));
+			} else {
+				panic!("expected state statement");
+			}
+		}
+	}
+
+	#[test]
+	fn class_definition() {
+		let src = r#"class C {
+    verb vRun { run(); }
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Class(class) = &ast[0] {
+			assert_eq!(class.name, "C");
+			assert_eq!(class.body.statements.len(), 1);
+		} else {
+			panic!("expected class");
+		}
+	}
+
+	#[test]
+	fn logical_and_equality_expression() {
+		let src = r#"script S {
+    if (a() && b == c) { }
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			if let Statement::If(stmt) = &script.body.statements[0] {
+				if let Expression::LogicalAnd(left, right) = &stmt.condition {
+					// left should be a function call
+					if let Expression::Primary(Primary::FunctionCall(fc)) = &**left {
+						assert_eq!(fc.name, "a");
+					} else {
+						panic!("expected function call");
+					}
+					if let Expression::Equality(_, EqualityOp::Equal, _) = &**right {
+					} else {
+						panic!("expected equality");
+					}
+				} else {
+					panic!("expected logical and");
+				}
+			}
+		}
+	}
 }

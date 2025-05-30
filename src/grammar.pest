@@ -35,10 +35,14 @@ expr        =  _{ assignment }
 assignment  =  { logical_or ~ ("=" ~ assignment)? }
 logical_or  =  { logical_and ~ ("||" ~ logical_and)* }
 logical_and =  { equality ~ ("&&" ~ equality)* }
-equality    =  { comparison ~ (("==" | "!=") ~ comparison)* }
-comparison  =  { term       ~ (("<" | ">" | "<=" | ">=") ~ term)* }
-term        =  { factor     ~ (("+" | "-") ~ factor)* }
-factor      =  { unary      ~ (("*" | "/") ~ unary)* }
+equality    =  { comparison ~ (eq_op ~ comparison)* }
+comparison  =  { term ~ (cmp_op ~ term)* }
+term        =  { factor ~ (add_op ~ factor)* }
+factor      =  { unary ~ (mul_op ~ unary)* }
+eq_op       = { "==" | "!=" }
+cmp_op      = { "<=" | ">=" | "<" | ">" }
+add_op      = { "+" | "-" }
+mul_op      = { "*" | "/" }
 unary       =  { ("!" | "-")* ~ primary }
 primary     =  { func_call | number | string | identifier | "(" ~ expr ~ ")" }
 func_call   =  { identifier ~ "(" ~ arg_list? ~ ")" }

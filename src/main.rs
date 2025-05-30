@@ -145,11 +145,15 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
 
-			// Each remaining pair is another comparison to compare with using ==
-			// The equality rule only supports == for now (we'd need to modify grammar for !=)
-			for right_pair in inner {
+			while let Some(op_pair) = inner.next() {
+				let right_pair = inner.next().unwrap();
+				let op = match op_pair.as_str() {
+					"==" => ast::EqualityOp::Equal,
+					"!=" => ast::EqualityOp::NotEqual,
+					_ => ast::EqualityOp::Equal,
+				};
 				let right_expr = parse_expression(right_pair);
-				expr = Expression::Equality(Box::new(expr), ast::EqualityOp::Equal, Box::new(right_expr));
+				expr = Expression::Equality(Box::new(expr), op, Box::new(right_expr));
 			}
 			expr
 		},
@@ -157,23 +161,17 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
 
-			// Process remaining pairs in groups: operator, operand, operator, operand, ...
-			let remaining: Vec<_> = inner.collect();
-			let mut i = 0;
-			while i + 1 < remaining.len() {
-				let op_str = remaining[i].as_str();
-				let right_expr = parse_expression(remaining[i + 1].clone());
-
-				let op = match op_str {
+			while let Some(op_pair) = inner.next() {
+				let right_pair = inner.next().unwrap();
+				let op = match op_pair.as_str() {
 					"<" => ast::ComparisonOp::Less,
 					">" => ast::ComparisonOp::Greater,
 					"<=" => ast::ComparisonOp::LessEqual,
 					">=" => ast::ComparisonOp::GreaterEqual,
-					_ => ast::ComparisonOp::Less, // fallback
+					_ => ast::ComparisonOp::Less,
 				};
-
+				let right_expr = parse_expression(right_pair);
 				expr = Expression::Comparison(Box::new(expr), op, Box::new(right_expr));
-				i += 2;
 			}
 			expr
 		},
@@ -181,21 +179,15 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
 
-			// Process remaining pairs in groups: operator, operand, operator, operand, ...
-			let remaining: Vec<_> = inner.collect();
-			let mut i = 0;
-			while i + 1 < remaining.len() {
-				let op_str = remaining[i].as_str();
-				let right_expr = parse_expression(remaining[i + 1].clone());
-
-				let op = match op_str {
+			while let Some(op_pair) = inner.next() {
+				let right_pair = inner.next().unwrap();
+				let op = match op_pair.as_str() {
 					"+" => ast::TermOp::Add,
 					"-" => ast::TermOp::Subtract,
-					_ => ast::TermOp::Add, // fallback
+					_ => ast::TermOp::Add,
 				};
-
+				let right_expr = parse_expression(right_pair);
 				expr = Expression::Term(Box::new(expr), op, Box::new(right_expr));
-				i += 2;
 			}
 			expr
 		},
@@ -203,21 +195,15 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			let mut inner = pair.into_inner();
 			let mut expr = parse_expression(inner.next().unwrap());
 
-			// Process remaining pairs in groups: operator, operand, operator, operand, ...
-			let remaining: Vec<_> = inner.collect();
-			let mut i = 0;
-			while i + 1 < remaining.len() {
-				let op_str = remaining[i].as_str();
-				let right_expr = parse_expression(remaining[i + 1].clone());
-
-				let op = match op_str {
+			while let Some(op_pair) = inner.next() {
+				let right_pair = inner.next().unwrap();
+				let op = match op_pair.as_str() {
 					"*" => ast::FactorOp::Multiply,
 					"/" => ast::FactorOp::Divide,
-					_ => ast::FactorOp::Multiply, // fallback
+					_ => ast::FactorOp::Multiply,
 				};
-
+				let right_expr = parse_expression(right_pair);
 				expr = Expression::Factor(Box::new(expr), op, Box::new(right_expr));
-				i += 2;
 			}
 			expr
 		},
@@ -720,6 +706,7 @@ mod tests {
 			panic!("expected script");
 		}
 	}
+
 
 	#[test]
 	fn function_call_arguments() {

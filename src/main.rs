@@ -251,11 +251,11 @@ fn parse_primary(pair: Pair<Rule>) -> Primary {
 	match pair.as_rule() {
 		Rule::number => Primary::Number(pair.as_str().parse().unwrap_or(0)),
 		Rule::string => {
-            let raw = pair.as_str();
-            // remove the leading and trailing "   (grammar guarantees they exist)
-            let inner = &raw[1..raw.len() - 1];
-            Primary::String(inner.to_string())
-        },
+			let raw = pair.as_str();
+			// remove the leading and trailing "   (grammar guarantees they exist)
+			let inner = &raw[1..raw.len() - 1];
+			Primary::String(inner.to_string())
+		},
 		Rule::identifier => Primary::Identifier(pair.as_str().to_string()),
 		Rule::func_call => {
 			let mut inner = pair.into_inner();
@@ -637,7 +637,7 @@ mod tests {
 					assert_eq!(fc.name, "prompt");
 					assert_eq!(fc.arguments.len(), 1);
 					if let Expression::Primary(Primary::String(s)) = &fc.arguments[0] {
-						assert_eq!(s, "\"hi\"");
+						assert_eq!(s, "hi");
 					} else {
 						panic!("expected string argument");
 					}

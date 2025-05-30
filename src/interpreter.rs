@@ -206,7 +206,7 @@ impl<'a> Interpreter<'a> {
 				for st in &c.body.statements {
 					if let Statement::Verb(v) = st {
 						if let Some(body) = &v.body {
-							vmap.insert(v.name.clone(), body);   // <-- NO extra ‘v’
+							vmap.insert(v.name.clone(), body); // <-- NO extra ‘v’
 						}
 					}
 				}
@@ -367,7 +367,7 @@ impl<'a> Interpreter<'a> {
 		});
 
 		self.builtins.insert("prompt".into(), |_, _, args| {
-			let msg = args.get(0).map(|v| v.as_string()).unwrap_or_default();
+			let msg = args.first().map(|v| v.as_string()).unwrap_or_default();
 			print!("{}", msg.trim_matches('"'));
 			io::stdout().flush().ok();
 			let mut input = String::new();
@@ -419,7 +419,7 @@ impl<'a> Interpreter<'a> {
 		});
 
 		self.builtins.insert("getState".into(), |interp, _, args| {
-			if let Some(obj) = args.get(0) {
+			if let Some(obj) = args.first() {
 				let id = interp.to_id(obj);
 				let state = interp.world.object_state.get(&id).copied().unwrap_or(0);
 				Value::Number(state as i32)
@@ -439,7 +439,7 @@ impl<'a> Interpreter<'a> {
 		});
 
 		self.builtins.insert("objectInHand".into(), |interp, _, args| {
-			if let Some(obj) = args.get(0) {
+			if let Some(obj) = args.first() {
 				let id = interp.to_id(obj);
 				Value::Bool(interp.world.inventory.contains(&id))
 			} else {
@@ -448,7 +448,7 @@ impl<'a> Interpreter<'a> {
 		});
 
 		self.builtins.insert("addToInventory".into(), |interp, _, args| {
-			if let Some(obj) = args.get(0) {
+			if let Some(obj) = args.first() {
 				let id = interp.to_id(obj);
 				interp.world.inventory.insert(id);
 				println!("[inventory] added object {id}");
@@ -457,7 +457,7 @@ impl<'a> Interpreter<'a> {
 		});
 
 		self.builtins.insert("pickupObject".into(), |interp, _, args| {
-			if let Some(obj) = args.get(0) {
+			if let Some(obj) = args.first() {
 				let id = interp.to_id(obj);
 				interp.world.inventory.insert(id);
 				println!("You pick up object {id}");
@@ -473,7 +473,7 @@ impl<'a> Interpreter<'a> {
 		});
 
 		self.builtins.insert("loadRoom".into(), |interp, _, args| {
-			if let Some(room) = args.get(0) {
+			if let Some(room) = args.first() {
 				let id = interp.to_id(room);
 				println!("[game] loading room {id} – thanks for playing!");
 				interp.tasks.clear(); // stop
@@ -795,10 +795,10 @@ impl<'a> Interpreter<'a> {
 					t.env.set("verbObj".into(), Value::Number(tgt));
 				}
 				self.tasks.push_back(t);
-				return true;            // ――― found & queued
+				return true; // ――― found & queued
 			}
 		}
-		false                             // ――― no such verb here
+		false // ――― no such verb here
 	}
 
 

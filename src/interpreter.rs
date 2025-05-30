@@ -3,12 +3,25 @@
 //! a `wait(ticks)` blocking builtin. Scheduler is cooperative like classic
 //! SCUMM. Call `run_scripts(ast)` once you have built the AST.
 //!
-//! ## Borrow‑checker strategy
-//! We cannot mutate `task.stmts` while holding an immutable borrow to a
-//! statement inside it.  Therefore `exec_stmt` **returns** a splice action to be
-//! applied *after* the borrowed reference is dropped.
+//! Compared with the previous version this file now supports:
+//! * Nested `{ … }` blocks (executed by splicing their contents)
+//! * A global constant table populated from `#define` directives
+//! * A registry of *all* scripts so `startScript()` can spawn them by number or
+//!   identifier at run‑time
+//! * A minimal world model (object states, rooms, inventory)
+//! * Many new built‑ins used by `example.sc`: `sayLine`, `prompt`,
+//!   `startScript`, `breakHere`, `putActorInRoom`, `putActor`, `setCameraAt`,
+//!   `walkActorTo`, `faceActor`, `getState`, `setState`, `objectInHand`,
+//!   `animateObject`, `addToInventory`, `pickupObject`, `loadRoom`.
+//!
+//! This is **still** a stub implementation – its purpose is to let the example
+//! game run end‑to‑end in a terminal and demonstrate control‑flow. Feel free to
+//! flesh out the data model or add more opcodes later.
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+	collections::{HashMap, HashSet, VecDeque},
+	io::{self, Write},
+};
 
 use crate::ast::*;
 
@@ -46,6 +59,14 @@ impl Value {
 			_ => 0,
 		}
 	}
+	fn as_string(&self) -> String {
+		match self {
+			Value::Str(s) => s.clone(),
+			Value::Number(n) => n.to_string(),
+			Value::Bool(b) => b.to_string(),
+			Value::Null => "<null>".into(),
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -57,8 +78,8 @@ struct Env {
 	vars: HashMap<String, Value>,
 }
 impl Env {
-	fn get(&self, name: &str) -> Value {
-		self.vars.get(name).cloned().unwrap_or(Value::Null)
+	fn get(&self, name: &str) -> Option<Value> {
+		self.vars.get(name).cloned()
 	}
 	fn set(&mut self, name: String, value: Value) {
 		self.vars.insert(name, value);
@@ -91,7 +112,18 @@ impl<'a> Task<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// Splice action returned from exec_stmt (must be at module scope)
+// World model (super‑simple!)
+// ---------------------------------------------------------------------------
+#[derive(Default)]
+struct World {
+	object_state: HashMap<i32, u32>, // OBJ -> current state number
+	object_room: HashMap<i32, i32>,  // OBJ -> room id (0 = nowhere)
+	inventory: HashSet<i32>,         // OBJ currently held by player
+	current_room: i32,
+}
+
+// ---------------------------------------------------------------------------
+// Splice action returned from exec_stmt
 // ---------------------------------------------------------------------------
 
 enum Action<'a> {
@@ -108,45 +140,262 @@ type BuiltinFn = fn(&mut Interpreter, &mut Task, Vec<Value>) -> Value;
 pub struct Interpreter<'a> {
 	tasks: VecDeque<Task<'a>>, // RUNNABLE queue
 	builtins: HashMap<String, BuiltinFn>,
+	scripts: HashMap<String, &'a Script>,
+	consts: HashMap<String, Value>,
+	world: World,
 }
 
 impl<'a> Interpreter<'a> {
+	// --------------------------------------------------
+	// Construction
+	// --------------------------------------------------
 	pub fn new(ast: &'a [TopLevel]) -> Self {
+		let mut scripts = HashMap::new();
+		let mut consts = HashMap::new();
+
+		// Pass 1 – collect scripts & defines
+		for tl in ast {
+			match tl {
+				TopLevel::Script(s) => match &s.name {
+					ScriptName::Identifier(name) => {
+						scripts.insert(name.clone(), s);
+					},
+					ScriptName::Number(n) => {
+						scripts.insert(n.to_string(), s);
+					},
+				},
+				TopLevel::Directive(name, val) if name == "define" => {
+					let mut parts = val.split_whitespace();
+					if let Some(ident) = parts.next() {
+						if let Some(rest) = parts.next() {
+							if let Ok(n) = rest.parse::<i32>() {
+								consts.insert(ident.to_string(), Value::Number(n));
+							} else {
+								consts.insert(ident.to_string(), Value::Str(rest.to_string()));
+							}
+						}
+					}
+				},
+				_ => {},
+			}
+		}
+
+		// Spawn script with ID 1 (ROOM_ID) as entry point, or fallback to first script
 		let mut tasks = VecDeque::new();
-		if let Some(scr) = ast.iter().find_map(|tl| if let TopLevel::Script(s) = tl { Some(s) } else { None }) {
+
+		// Try to find script with ID "1" first (ROOM_ID convention)
+		let entry_script = scripts
+			.get("1")
+			.or_else(|| scripts.get("ROOM_ID"))
+			.or_else(|| scripts.iter().next().map(|(_, script)| script));
+
+		if let Some(scr) = entry_script {
+			let script_name = scripts
+				.iter()
+				.find(|(_, script)| std::ptr::eq(*script, scr))
+				.map(|(name, _)| name.as_str())
+				.unwrap_or("unknown");
+			eprintln!("[info] starting script {script_name}");
 			tasks.push_back(Task::new(&scr.body));
 		}
+
 		let mut this = Self {
 			tasks,
 			builtins: HashMap::new(),
+			scripts,
+			consts,
+			world: World::default(),
 		};
 		this.install_builtins();
 		this
 	}
 
+	// --------------------------------------------------
+	// Built‑ins
+	// --------------------------------------------------
 	fn install_builtins(&mut self) {
+		use Value::*;
+
 		self.builtins.insert("print".into(), |_, _, args| {
 			for v in args {
-				match v {
-					Value::Number(n) => print!("{}", n),
-					Value::Bool(b) => print!("{}", b),
-					Value::Str(s) => print!("{}", s),
-					Value::Null => print!("<null>"),
-				}
+				print!("{}", v.as_string());
 			}
 			println!();
-			Value::Null
+			Null
 		});
+
 		self.builtins.insert("wait".into(), |_, task, mut args| {
-			task.delay = args.pop().unwrap_or(Value::Number(1)).as_number() as u32;
-			Value::Null
+			let ticks = args.pop().unwrap_or(Number(1)).as_number();
+			task.delay = ticks as u32;
+			Null
+		});
+
+		self.builtins.insert("breakHere".into(), |_, task, _| {
+			task.delay = 1; // yield for one tick
+			Null
+		});
+
+		self.builtins.insert("sayLine".into(), |_, _, args| {
+			if args.len() >= 2 {
+				let txt = args[1].as_string();
+				println!("{}", txt.trim_matches('"'));
+			}
+			Null
+		});
+
+		self.builtins.insert("prompt".into(), |_, _, args| {
+			let msg = args.get(0).map(|v| v.as_string()).unwrap_or_default();
+			print!("{}", msg.trim_matches('"'));
+			io::stdout().flush().ok();
+			let mut input = String::new();
+			io::stdin().read_line(&mut input).ok();
+			Value::Str(input.trim().to_string())
+		});
+
+		self.builtins.insert("startScript".into(), |interp, _, mut args| {
+			if let Some(id) = args.pop() {
+				interp.spawn_script_value(id);
+			}
+			Null
+		});
+
+		// ---- World manipulation stubs ----
+		self.builtins.insert("putActorInRoom".into(), |interp, _, args| {
+			if args.len() >= 2 {
+				let actor = interp.to_id(&args[0]);
+				let room = interp.to_id(&args[1]);
+				interp.world.object_room.insert(actor, room);
+				println!("[actor {actor}] appears in room {room}");
+			}
+			Null
+		});
+
+		self.builtins.insert("putActor".into(), |_, _, args| {
+			if args.len() >= 3 {
+				println!("[actor {}] placed at {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
+			}
+			Null
+		});
+		self.builtins.insert("setCameraAt".into(), |_, _, args| {
+			if args.len() >= 2 {
+				println!("[camera] room {} target x {}", args[0].as_string(), args[1].as_string());
+			}
+			Null
+		});
+		self.builtins.insert("walkActorTo".into(), |_, _, args| {
+			if args.len() >= 3 {
+				println!("[actor {}] walks to {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
+			}
+			Null
+		});
+		self.builtins.insert("faceActor".into(), |_, _, args| {
+			if args.len() >= 2 {
+				println!("[actor {}] faces dir {}", args[0].as_string(), args[1].as_string());
+			}
+			Null
+		});
+
+		self.builtins.insert("getState".into(), |interp, _, args| {
+			if let Some(obj) = args.get(0) {
+				let id = interp.to_id(obj);
+				let state = interp.world.object_state.get(&id).copied().unwrap_or(0);
+				Value::Number(state as i32)
+			} else {
+				Null
+			}
+		});
+
+		self.builtins.insert("setState".into(), |interp, _, args| {
+			if args.len() >= 2 {
+				let obj = interp.to_id(&args[0]);
+				let val = args[1].as_number() as u32;
+				interp.world.object_state.insert(obj, val);
+				println!("[object {obj}] state set to {val}");
+			}
+			Null
+		});
+
+		self.builtins.insert("objectInHand".into(), |interp, _, args| {
+			if let Some(obj) = args.get(0) {
+				let id = interp.to_id(obj);
+				Value::Bool(interp.world.inventory.contains(&id))
+			} else {
+				Value::Bool(false)
+			}
+		});
+
+		self.builtins.insert("addToInventory".into(), |interp, _, args| {
+			if let Some(obj) = args.get(0) {
+				let id = interp.to_id(obj);
+				interp.world.inventory.insert(id);
+				println!("[inventory] added object {id}");
+			}
+			Null
+		});
+
+		self.builtins.insert("pickupObject".into(), |interp, _, args| {
+			if let Some(obj) = args.get(0) {
+				let id = interp.to_id(obj);
+				interp.world.inventory.insert(id);
+				println!("You pick up object {id}");
+			}
+			Null
+		});
+
+		self.builtins.insert("animateObject".into(), |_, _, args| {
+			if args.len() >= 2 {
+				println!("[object {}] plays anim {}", args[0].as_string(), args[1].as_string());
+			}
+			Null
+		});
+
+		self.builtins.insert("loadRoom".into(), |interp, _, args| {
+			if let Some(room) = args.get(0) {
+				let id = interp.to_id(room);
+				println!("[game] loading room {id} – thanks for playing!");
+				interp.tasks.clear(); // stop
+			}
+			Null
 		});
 	}
 
-	// ------------------------------------------------------------------
-	// Run until no runnable tasks remain
-	// ------------------------------------------------------------------
+	// --------------------------------------------------
+	// Script spawning helpers
+	// --------------------------------------------------
+	fn spawn_script_value(&mut self, v: Value) {
+		match v {
+			Value::Number(n) => self.spawn_script(&n.to_string()),
+			Value::Str(s) => self.spawn_script(&s),
+			_ => {},
+		}
+	}
 
+	fn spawn_script(&mut self, key: &str) {
+		if let Some(scr) = self.scripts.get(key) {
+			eprintln!("[info] startScript -> {}", key);
+			self.tasks.push_back(Task::new(&scr.body));
+		} else {
+			eprintln!("[warn] startScript: unknown script {key}");
+		}
+	}
+
+	fn to_id(&self, v: &Value) -> i32 {
+		match v {
+			Value::Number(n) => *n,
+			Value::Str(s) => {
+				if let Some(Value::Number(n)) = self.consts.get(s) {
+					*n
+				} else {
+					0 // unknown -> 0
+				}
+			},
+			_ => 0,
+		}
+	}
+
+	// --------------------------------------------------
+	// Run until no runnable tasks remain
+	// --------------------------------------------------
 	pub fn run(&mut self) {
 		while let Some(mut task) = self.tasks.pop_front() {
 			if task.delay > 0 {
@@ -157,12 +406,10 @@ impl<'a> Interpreter<'a> {
 
 			let stmt_ref = match task.next() {
 				Some(s) => s,
-				None => continue,
-			}; // finished
+				None => continue, // finished
+			};
 			let action = self.exec_stmt(stmt_ref, &mut task);
 			task.ip += 1; // advance before splicing
-			// drop borrow explicitly
-			let _ = stmt_ref;
 
 			// apply queued splice action
 			if let Action::Splice { at, items } = action {
@@ -177,13 +424,23 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	// ------------------------------------------------------------------
+	// --------------------------------------------------
 	// Execute a single statement, returning structural changes
-	// ------------------------------------------------------------------
-
+	// --------------------------------------------------
 	fn exec_stmt(&mut self, stmt: &'a Statement, task: &mut Task<'a>) -> Action<'a> {
 		match stmt {
-			// ---------------- expr & var ----------------
+			// ---- nested block ----
+			Statement::Block(b) => {
+				if b.statements.is_empty() {
+					Action::None
+				} else {
+					Action::Splice {
+						at: task.ip + 1,
+						items: b.statements.iter().collect(),
+					}
+				}
+			},
+			// ---- expr & var ----
 			Statement::Expression(e) => {
 				self.eval_expr(e, task);
 				Action::None
@@ -193,18 +450,15 @@ impl<'a> Interpreter<'a> {
 				task.env.set(v.name.clone(), val);
 				Action::None
 			},
-
-			// ---------------- IF ------------------------
+			// ---- IF ----
 			Statement::If(ifst) => {
-				// choose appropriate block without referencing a temporary
 				let chosen: &Block = if self.eval_expr(&ifst.condition, task).truthy() {
 					&ifst.then_block
 				} else if let Some(ref else_block) = ifst.else_block {
 					else_block
 				} else {
-					return Action::None; // nothing to execute
+					return Action::None;
 				};
-
 				if chosen.statements.is_empty() {
 					Action::None
 				} else {
@@ -214,8 +468,7 @@ impl<'a> Interpreter<'a> {
 					}
 				}
 			},
-
-			// ---------------- WHILE ---------------------
+			// ---- WHILE ----
 			Statement::While(wh) => {
 				if self.eval_expr(&wh.condition, task).truthy() {
 					let mut items: Vec<&'a Statement> = wh.body.statements.iter().collect();
@@ -225,19 +478,19 @@ impl<'a> Interpreter<'a> {
 					Action::None
 				}
 			},
-
-			_ => Action::None, // others unimplemented for now
+			// Everything else (class / verb / etc.) is no‑op at run‑time for now.
+			_ => Action::None,
 		}
 	}
 
-	// ------------------------------------------------------------------
+	// --------------------------------------------------
 	// Expression evaluation
-	// ------------------------------------------------------------------
-
+	// --------------------------------------------------
 	fn eval_expr(&mut self, expr: &'a Expression, task: &mut Task<'a>) -> Value {
+		use Expression::*;
 		match expr {
-			Expression::Primary(p) => self.eval_primary(p, task),
-			Expression::Assignment(lhs, rhs) => {
+			Primary(p) => self.eval_primary(p, task),
+			Assignment(lhs, rhs) => {
 				if let Expression::Primary(crate::ast::Primary::Identifier(name)) = &**lhs {
 					let v = self.eval_expr(rhs, task);
 					task.env.set(name.clone(), v.clone());
@@ -246,19 +499,19 @@ impl<'a> Interpreter<'a> {
 					Value::Null
 				}
 			},
-			Expression::LogicalOr(a, b) => {
+			LogicalOr(a, b) => {
 				let av = self.eval_expr(a, task);
 				if av.truthy() { av } else { self.eval_expr(b, task) }
 			},
-			Expression::LogicalAnd(a, b) => {
+			LogicalAnd(a, b) => {
 				let av = self.eval_expr(a, task);
 				if !av.truthy() { av } else { self.eval_expr(b, task) }
 			},
-			Expression::Equality(a, op, b) => Value::Bool(match op {
+			Equality(a, op, b) => Value::Bool(match op {
 				EqualityOp::Equal => self.eval_expr(a, task) == self.eval_expr(b, task),
 				EqualityOp::NotEqual => self.eval_expr(a, task) != self.eval_expr(b, task),
 			}),
-			Expression::Comparison(a, op, b) => {
+			Comparison(a, op, b) => {
 				let av = self.eval_expr(a, task).as_number();
 				let bv = self.eval_expr(b, task).as_number();
 				Value::Bool(match op {
@@ -268,7 +521,7 @@ impl<'a> Interpreter<'a> {
 					ComparisonOp::GreaterEqual => av >= bv,
 				})
 			},
-			Expression::Term(a, op, b) => {
+			Term(a, op, b) => {
 				let av = self.eval_expr(a, task).as_number();
 				let bv = self.eval_expr(b, task).as_number();
 				Value::Number(match op {
@@ -276,7 +529,7 @@ impl<'a> Interpreter<'a> {
 					TermOp::Subtract => av - bv,
 				})
 			},
-			Expression::Factor(a, op, b) => {
+			Factor(a, op, b) => {
 				let av = self.eval_expr(a, task).as_number();
 				let bv = self.eval_expr(b, task).as_number();
 				Value::Number(match op {
@@ -284,7 +537,7 @@ impl<'a> Interpreter<'a> {
 					FactorOp::Divide => av / bv,
 				})
 			},
-			Expression::Unary(u, e) => {
+			Unary(u, e) => {
 				let v = self.eval_expr(e, task);
 				match u {
 					UnaryOp::Not => Value::Bool(!v.truthy()),
@@ -298,7 +551,16 @@ impl<'a> Interpreter<'a> {
 		match prim {
 			crate::ast::Primary::Number(n) => Value::Number(*n as i32),
 			crate::ast::Primary::String(s) => Value::Str(s.clone()),
-			crate::ast::Primary::Identifier(id) => task.env.get(id),
+			crate::ast::Primary::Identifier(id) => {
+				if let Some(v) = task.env.get(id) {
+					v
+				} else if let Some(c) = self.consts.get(id) {
+					c.clone()
+				} else {
+					// Treat unknown identifier as its literal name (useful for script symbols)
+					Value::Str(id.clone())
+				}
+			},
 			crate::ast::Primary::Parenthesized(expr) => self.eval_expr(expr, task),
 			crate::ast::Primary::FunctionCall(fc) => {
 				let args = fc.arguments.iter().map(|e| self.eval_expr(e, task)).collect::<Vec<_>>();

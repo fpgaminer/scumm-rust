@@ -38,15 +38,15 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-	Block(Block),
-	Expression(Expression),
-	If(IfStatement),
-	While(WhileStatement),
-	ClassDeclaration(String),
-	VerbStatement(VerbStatement),
-	VariableDeclaration(VariableDeclaration),
-	PropertyAssignment(PropertyAssignment),
-	StateStatement(StateStatement),
+        Block(Block),
+        Expression(Expression),
+        If(IfStatement),
+        While(WhileStatement),
+        ClassDeclaration(String),
+        Verb(VerbStatement),
+        VariableDeclaration(VariableDeclaration),
+        PropertyAssignment(PropertyAssignment),
+        State(StateStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]

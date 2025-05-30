@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TopLevel {
 	Script(Script),
 	Object(Object),
@@ -6,37 +6,37 @@ pub enum TopLevel {
 	Directive(String, String), // directive name and value
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Script {
 	pub name: ScriptName,
 	pub body: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Object {
 	pub id: String,
 	pub name: String,
 	pub body: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Class {
 	pub name: String,
 	pub body: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScriptName {
 	Number(u32),
 	Identifier(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
 	pub statements: Vec<Statement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
 	Block(Block),
 	Expression(Expression),
@@ -49,52 +49,52 @@ pub enum Statement {
 	StateStatement(StateStatement),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStatement {
 	pub condition: Expression,
 	pub then_block: Block,
 	pub else_block: Option<Block>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhileStatement {
 	pub condition: Expression,
 	pub body: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VerbStatement {
 	pub name: String,
 	pub body: Option<Block>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VariableDeclaration {
 	pub var_type: String,
 	pub name: String,
 	pub value: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PropertyAssignment {
 	pub name: String,
 	pub value: PropertyValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PropertyValue {
 	Number(u32),
 	String(String),
 	Identifier(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StateStatement {
 	pub number: u32,
 	pub assignments: Vec<(String, Primary)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
 	Assignment(Box<Expression>, Box<Expression>),
 	LogicalOr(Box<Expression>, Box<Expression>),
@@ -107,13 +107,13 @@ pub enum Expression {
 	Primary(Primary),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EqualityOp {
 	Equal,
 	NotEqual,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ComparisonOp {
 	Less,
 	Greater,
@@ -121,25 +121,25 @@ pub enum ComparisonOp {
 	GreaterEqual,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TermOp {
 	Add,
 	Subtract,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FactorOp {
 	Multiply,
 	Divide,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
 	Not,
 	Negate,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Primary {
 	FunctionCall(FunctionCall),
 	Number(u32),
@@ -148,7 +148,7 @@ pub enum Primary {
 	Parenthesized(Box<Expression>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionCall {
 	pub name: String,
 	pub arguments: Vec<Expression>,

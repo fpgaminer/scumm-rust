@@ -3,6 +3,9 @@ mod interpreter;
 mod preprocessor;
 
 use anyhow::{Context, Result};
+use wasm_bindgen::prelude::*;
+use web_sys::{window, Response};
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 use ast::{
 	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Script, ScriptName, StateStatement, Statement,
 	TopLevel, VariableDeclaration, VerbStatement, WhileStatement,
@@ -356,12 +359,38 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 	Ok(ast_nodes)
 }
 
-fn main() -> Result<()> {
-	let filename = env::args().nth(1).context("Usage: scummc_compiler <file.sc>")?;
-	let entry = Path::new(&filename);
 
+pub async fn load_script_raw() -> Result<String, JsValue> {
+    let resp_value = JsFuture::from(
+        window().unwrap().fetch_with_str("/example.sc")
+    )
+    .await?;
+
+    let resp: Response = resp_value.dyn_into()?;
+    let text = JsFuture::from(resp.text()?).await?;
+    Ok(text.as_string().unwrap())
+}
+
+
+#[wasm_bindgen]
+pub fn start() {
+	web_sys::console::log_1(&JsValue::from_str("Starting Scumm Script Parser..."));
+	spawn_local(async {
+		match load_script_raw().await {
+			Ok(source) => {
+				handle_script(source.as_bytes())
+					.map_err(|e| web_sys::console::error_1(&JsValue::from_str(&e.to_string())))
+					.unwrap_or(());
+			}
+			Err(err) => web_sys::console::error_1(&err),
+		}
+	});
+}
+
+
+fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 	// Phase 1: preprocess includes.
-	let flattened = preprocess(entry)?;
+	let flattened = preprocess("main.sc", &String::from_utf8_lossy(data))?;
 	println!("Preprocessed content length: {} chars", flattened.len());
 
 	// Phase 2: parse.
@@ -451,12 +480,26 @@ fn main() -> Result<()> {
 		}
 	}
 
-	println!("Parsed successfully! AST nodes: {:#?}", ast_nodes);
+	//println!("Parsed successfully! AST nodes: {:#?}", ast_nodes);
+	web_sys::console::log_1(&JsValue::from_str(&format!("Parsed successfully! AST nodes: {:?}", ast_nodes)));
 
-	interpreter::run_scripts(&ast_nodes);
+	//interpreter::run_scripts(&ast_nodes);
 
 	Ok(())
 }
+
+
+pub fn set_panic_hook() {
+    // When the `console_error_panic_hook` feature is enabled, we can call the
+    // `set_panic_hook` function at least once during initialization, and then
+    // we will get better error messages if our code ever panics.
+    //
+    // For more details see
+    // https://github.com/rustwasm/console_error_panic_hook#readme
+    #[cfg(feature = "console_error_panic_hook")]
+    console_error_panic_hook::set_once();
+}
+
 
 #[cfg(test)]
 mod tests {

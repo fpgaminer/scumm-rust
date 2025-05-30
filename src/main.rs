@@ -31,11 +31,7 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 		Rule::block => Some(Statement::Block(parse_block(pair))),
 		Rule::expr_stmt => {
 			let mut inner = pair.into_inner();
-			if let Some(expr_pair) = inner.next() {
-				Some(Statement::Expression(parse_expression(expr_pair)))
-			} else {
-				None
-			}
+			inner.next().map(|expr_pair| Statement::Expression(parse_expression(expr_pair)))
 		},
 		Rule::if_stmt => {
 			let mut inner = pair.into_inner();
@@ -72,7 +68,7 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let mut inner = pair.into_inner();
 			let name = inner.next()?.as_str().to_string();
 			let body = inner.next().map(parse_block);
-			Some(Statement::VerbStatement(VerbStatement { name, body }))
+			Some(Statement::Verb(VerbStatement { name, body }))
 		},
 		Rule::var_decl => {
 			let mut inner = pair.into_inner();
@@ -106,7 +102,7 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 					}
 				}
 			}
-			Some(Statement::StateStatement(StateStatement { number, assignments }))
+			Some(Statement::State(StateStatement { number, assignments }))
 		},
 		_ => None,
 	}
@@ -526,14 +522,14 @@ mod tests {
 
 				matches!(obj.body.statements[0], Statement::ClassDeclaration(_));
 
-				if let Statement::VerbStatement(ref verb) = obj.body.statements[1] {
+				if let Statement::Verb(ref verb) = obj.body.statements[1] {
 					assert_eq!(verb.name, "vOne");
 					assert!(verb.body.is_none());
 				} else {
 					panic!("expected verb statement");
 				}
 
-				if let Statement::VerbStatement(ref verb) = obj.body.statements[2] {
+				if let Statement::Verb(ref verb) = obj.body.statements[2] {
 					assert_eq!(verb.name, "vTwo");
 					let body = verb.body.as_ref().unwrap();
 					assert_eq!(body.statements.len(), 1);
@@ -623,7 +619,7 @@ mod tests {
 }"#;
 		let ast = parse_ok(src);
 		if let TopLevel::Object(obj) = &ast[0] {
-			if let Statement::StateStatement(state) = &obj.body.statements[0] {
+			if let Statement::State(state) = &obj.body.statements[0] {
 				assert_eq!(state.number, 0);
 				assert_eq!(state.assignments.len(), 1);
 				assert_eq!(state.assignments[0].0, "open");

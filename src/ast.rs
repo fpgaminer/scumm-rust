@@ -43,10 +43,10 @@ pub enum Statement {
 	If(IfStatement),
 	While(WhileStatement),
 	ClassDeclaration(String),
-	VerbStatement(VerbStatement),
+	Verb(VerbStatement),
 	VariableDeclaration(VariableDeclaration),
 	PropertyAssignment(PropertyAssignment),
-	StateStatement(StateStatement),
+	State(StateStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]

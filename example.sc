@@ -59,6 +59,7 @@ object OBJ_TUER "Tür"
 /*** Tresor ***/
 object OBJ_TRESOR "Tresor"
 {
+    costume 2;        // obj002.png - closed safe
     state  0  open=0;
     class  oClassBox;
     verb   vOpen
@@ -104,6 +105,7 @@ script S_REVEAL_HANDLE
 /*** Türgriff (appears only after safe opened) ***/
 object OBJ_TUERGRIFF "Türgriff"
 {
+    costume 8;            // obj008.png - door handle
     initialRoom  0;            // hidden until spawned
     class  oClassPickup;
     verb   vUse
@@ -124,6 +126,7 @@ object OBJ_SCHREIBTISCH "Schreibtisch"
 /*** Schublade ***/
 object OBJ_SCHUBLADE "Schublade"
 {
+    costume 3;            // obj003.png - closed drawer
     state  0  open=0;
     class  oClassDrawer;
     verb   vOpen
@@ -137,6 +140,7 @@ object OBJ_SCHUBLADE "Schublade"
 /*** Notiz ***/
 object OBJ_NOTIZ "Notiz"
 {
+    costume 4;            // obj004.png - paper note
     initialRoom  0;
     class  oClassPickup;
     verb vRead
@@ -157,6 +161,7 @@ object OBJ_BUECHERREGAL "Bücherregal"
 /*** Rotes Buch ***/
 object OBJ_ROTES_BUCH "rotes Buch"
 {
+    costume 5;             // obj005.png - red book
     class oClassBook;
     verb vOpen
     {
@@ -168,6 +173,7 @@ object OBJ_ROTES_BUCH "rotes Buch"
 /*** Schlüssel ***/
 object OBJ_SCHLUESSEL "Schlüssel"
 {
+    costume 6;               // obj006.png - key
     initialRoom 0;
     class oClassPickup;
 }
@@ -184,6 +190,7 @@ object OBJ_POSTER "Poster"
 /*** Wörterbuch (inventory) ***/
 object OBJ_WOERTERBUCH "Wörterbuch"
 {
+    costume 9;                // obj009.png - dictionary
     initialRoom 0;
     class oClassPickup;
 }

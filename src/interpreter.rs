@@ -1,45 +1,150 @@
-//! A very small, cooperative‑multitasking interpreter for a subset of
-//! Scumm‑style script syntax. *Text‑only* for now – prints to stdout and offers
-//! a `wait(ticks)` blocking builtin. Scheduler is cooperative like classic
-//! SCUMM. Call `run_scripts(ast)` once you have built the AST.
-//!
-//! Compared with the previous version this file now supports:
-//! * Nested `{ … }` blocks (executed by splicing their contents)
-//! * A global constant table populated from `#define` directives
-//! * A registry of *all* scripts so `startScript()` can spawn them by number or
-//!   identifier at run‑time
-//! * A minimal world model (object states, rooms, inventory)
-//! * Many new built‑ins used by `example.sc`: `sayLine`, `prompt`,
-//!   `startScript`, `breakHere`, `putActorInRoom`, `putActor`, `setCameraAt`,
-//!   `walkActorTo`, `faceActor`, `getState`, `setState`, `objectInHand`,
-//!   `animateObject`, `addToInventory`, `pickupObject`, `loadRoom`.
-//!
-//! This is **still** a stub implementation – its purpose is to let the example
-//! game run end‑to‑end in a terminal and demonstrate control‑flow. Feel free to
-//! flesh out the data model or add more opcodes later.
-
 use std::{
+	cell::RefCell,
 	collections::{HashMap, HashSet, VecDeque},
 	io::{self, Write},
+	pin::Pin,
+	rc::Rc,
 };
 
 use crate::ast::*;
+use futures::{FutureExt, future::LocalBoxFuture};
+use wasm_bindgen::prelude::*;
+use web_sys::{Document, Element};
+
 
 // ---------------------------------------------------------------------------
 // Runtime object definition (built from the AST once at start-up)
 // ---------------------------------------------------------------------------
-struct ObjectDef<'a> {
+struct ObjectDef {
 	id: i32,
-	name: String,                      // human readable name
-	verbs: HashMap<String, &'a Block>, // vLook, vOpen, …
-	init_room: i32,                    // 0 = nowhere / inventory only
+	name: String,                  // human readable name
+	verbs: HashMap<String, Block>, // vLook, vOpen, …
+	init_room: i32,                // 0 = nowhere / inventory only
 	init_state: u32,
+	costume: Option<i32>, // costume number for visual display
+}
+
+
+/// SCUMM VM task context
+#[derive(Clone)]
+pub struct Ctx {
+	pub vars: Rc<RefCell<HashMap<String, Value>>>,
+	pub delay: Rc<RefCell<u32>>, // delay for blocking calls like wait()
+	pub interpreter: Interpreter,
 }
 
 
 // ---------------------------------------------------------------------------
-// Dynamic value type
+// Web interface for managing DOM
 // ---------------------------------------------------------------------------
+#[derive(Clone)]
+struct WebInterface {
+	document: Document,
+	game_container: Element,
+	room_container: Element,
+}
+
+impl WebInterface {
+	fn new() -> Result<Self, JsValue> {
+		let window = web_sys::window().ok_or("No global `window` exists")?;
+		let document = window.document().ok_or("Should have a document on window")?;
+
+		// Create main game container
+		let game_container = document.create_element("div")?;
+		game_container.set_attribute("id", "game-container")?;
+		game_container.set_attribute(
+			"style",
+			"position: relative; width: 640px; height: 480px; background: #000; margin: 0 auto; border: 2px solid #333;",
+		)?;
+
+		// Create room container for objects
+		let room_container = document.create_element("div")?;
+		room_container.set_attribute("id", "room-container")?;
+		room_container.set_attribute("style", "position: relative; width: 100%; height: 100%;")?;
+
+		game_container.append_child(&room_container)?;
+
+		// Append to body or app div
+		if let Some(app) = document.get_element_by_id("app") {
+			app.append_child(&game_container)?;
+		} else {
+			document.body().unwrap().append_child(&game_container)?;
+		}
+
+		Ok(WebInterface {
+			document,
+			game_container,
+			room_container,
+		})
+	}
+
+	fn create_object_div(&self, object_def: &ObjectDef, room_id: i32) -> Result<Element, JsValue> {
+		let div = self.document.create_element("div")?;
+		div.set_attribute("id", &format!("object-{}", object_def.id))?;
+		div.set_attribute("class", "game-object")?;
+		div.set_attribute("data-object-id", &object_def.id.to_string())?;
+
+		// Basic positioning and styling
+		let mut style = "position: absolute; cursor: pointer; border: 1px solid #666; padding: 5px; background: #333; color: white; font-family: monospace; font-size: 12px;".to_string();
+
+		// Set costume-based appearance
+		if let Some(costume) = object_def.costume {
+			// For now, use costume number as a simple visual indicator
+			// Later this would load actual image files
+			style.push_str(&format!(
+				" background-image: url('obj{:03}.png'); background-size: contain; background-repeat: no-repeat; width: 32px; height: 32px;",
+				costume
+			));
+			div.set_inner_html(&format!("<span style='display:none'>{}</span>", object_def.name));
+		} else {
+			// No costume - show as text
+			div.set_inner_html(&object_def.name);
+			style.push_str(" min-width: 60px; text-align: center;");
+		}
+
+		// Random positioning for now (later would be specified in the script)
+		let x = (object_def.id * 37) % 500; // Simple pseudo-random positioning
+		let y = (object_def.id * 73) % 350;
+		style.push_str(&format!(" left: {}px; top: {}px;", x, y));
+
+		div.set_attribute("style", &style)?;
+		div.set_attribute("title", &object_def.name)?;
+
+		Ok(div)
+	}
+
+	fn show_object(&self, object_id: i32, room_id: i32) -> Result<(), JsValue> {
+		if let Some(div) = self.document.get_element_by_id(&format!("object-{}", object_id)) {
+			div.set_attribute("style", &div.get_attribute("style").unwrap_or_default().replace("display: none;", ""))?;
+		}
+		Ok(())
+	}
+
+	fn hide_object(&self, object_id: i32) -> Result<(), JsValue> {
+		if let Some(div) = self.document.get_element_by_id(&format!("object-{}", object_id)) {
+			let current_style = div.get_attribute("style").unwrap_or_default();
+			div.set_attribute("style", &format!("{}; display: none;", current_style))?;
+		}
+		Ok(())
+	}
+
+	fn display_message(&self, message: &str) -> Result<(), JsValue> {
+		// Create or update message area
+		let message_div = if let Some(existing) = self.document.get_element_by_id("game-message") {
+			existing
+		} else {
+			let div = self.document.create_element("div")?;
+			div.set_attribute("id", "game-message")?;
+			div.set_attribute("style", "position: absolute; bottom: 10px; left: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 10px; font-family: monospace; border: 1px solid #666;")?;
+			self.game_container.append_child(&div)?;
+			div
+		};
+
+		message_div.set_inner_html(message);
+		Ok(())
+	}
+}
+
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -50,7 +155,7 @@ pub enum Value {
 }
 
 impl Value {
-	fn truthy(&self) -> bool {
+	pub fn truthy(&self) -> bool {
 		match self {
 			Value::Bool(b) => *b,
 			Value::Number(n) => *n != 0,
@@ -58,7 +163,7 @@ impl Value {
 			Value::Null => false,
 		}
 	}
-	fn as_number(&self) -> i32 {
+	pub fn as_number(&self) -> i32 {
 		match self {
 			Value::Number(n) => *n,
 			Value::Bool(b) => {
@@ -71,7 +176,7 @@ impl Value {
 			_ => 0,
 		}
 	}
-	fn as_string(&self) -> String {
+	pub fn as_string(&self) -> String {
 		match self {
 			Value::Str(s) => s.clone(),
 			Value::Number(n) => n.to_string(),
@@ -81,47 +186,6 @@ impl Value {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Environments (locals per task)
-// ---------------------------------------------------------------------------
-
-#[derive(Default, Debug)]
-struct Env {
-	vars: HashMap<String, Value>,
-}
-impl Env {
-	fn get(&self, name: &str) -> Option<Value> {
-		self.vars.get(name).cloned()
-	}
-	fn set(&mut self, name: String, value: Value) {
-		self.vars.insert(name, value);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Task = running script instance
-// ---------------------------------------------------------------------------
-
-#[derive(Debug)]
-struct Task<'a> {
-	stmts: Vec<&'a Statement>,
-	ip: usize,
-	env: Env,
-	delay: u32,
-}
-impl<'a> Task<'a> {
-	fn new(block: &'a Block) -> Self {
-		Self {
-			stmts: block.statements.iter().collect(),
-			ip: 0,
-			env: Env::default(),
-			delay: 0,
-		}
-	}
-	fn next(&self) -> Option<&'a Statement> {
-		self.stmts.get(self.ip).copied()
-	}
-}
 
 // ---------------------------------------------------------------------------
 // World model (super‑simple!)
@@ -134,48 +198,48 @@ struct World {
 	current_room: i32,
 }
 
-// ---------------------------------------------------------------------------
-// Splice action returned from exec_stmt
-// ---------------------------------------------------------------------------
 
-enum Action<'a> {
-	None,
-	Splice { at: usize, items: Vec<&'a Statement> },
+type BuiltinFn = dyn for<'a> Fn(Vec<Value>, &'a Ctx) -> LocalBoxFuture<'a, Value>;
+type TaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
+
+/// A running instance of a script
+struct Task {
+	fut: TaskFuture,
+	ctx: Ctx,
 }
 
-// ---------------------------------------------------------------------------
-// Interpreter / scheduler
-// ---------------------------------------------------------------------------
 
-type BuiltinFn = fn(&mut Interpreter, &mut Task, Vec<Value>) -> Value;
-
-pub struct Interpreter<'a> {
-	tasks: VecDeque<Task<'a>>, // RUNNABLE queue
-	builtins: HashMap<String, BuiltinFn>,
-	scripts: HashMap<String, &'a Script>,
-	consts: HashMap<String, Value>,
-	world: World,
-	objects: HashMap<i32, ObjectDef<'a>>, // id → def
-	object_names: HashMap<String, i32>,   // lowercase name → id  (for parser)
+#[derive(Clone)]
+pub struct Interpreter {
+	//tasks: VecDeque<Task>, // RUNNABLE queue
+	pub builtins: Rc<HashMap<String, Rc<BuiltinFn>>>,
+	scripts: Rc<HashMap<String, Script>>,
+	pub consts: Rc<HashMap<String, Value>>,
+	world: Rc<RefCell<World>>,
+	objects: Rc<HashMap<i32, ObjectDef>>,   // id → def
+	object_names: Rc<HashMap<String, i32>>, // lowercase name → id  (for parser)
+	web_interface: WebInterface,            // Web DOM interface
+	run_queue: Rc<RefCell<VecDeque<Task>>>,
 }
 
-impl<'a> Interpreter<'a> {
+impl Interpreter {
 	// --------------------------------------------------
 	// Construction
 	// --------------------------------------------------
-	pub fn new(ast: &'a [TopLevel]) -> Self {
+	pub fn new(ast: &[TopLevel]) -> Self {
 		let mut scripts = HashMap::new();
 		let mut consts = HashMap::new();
+		let mut class_verbs = HashMap::new();
 
-		// Pass 1 – collect scripts & defines
+		// Pass 1 – collect scripts, defines, and classes
 		for tl in ast {
 			match tl {
 				TopLevel::Script(s) => match &s.name {
 					ScriptName::Identifier(name) => {
-						scripts.insert(name.clone(), s);
+						scripts.insert(name.clone(), s.clone());
 					},
 					ScriptName::Number(n) => {
-						scripts.insert(n.to_string(), s);
+						scripts.insert(n.to_string(), s.clone());
 					},
 				},
 				TopLevel::Directive(name, val) if name == "define" => {
@@ -190,31 +254,23 @@ impl<'a> Interpreter<'a> {
 						}
 					}
 				},
+				TopLevel::Class(c) => {
+					for st in &c.body.statements {
+						if let Statement::Verb(v) = st {
+							if let Some(body) = &v.body {
+								class_verbs
+									.entry(c.name.clone())
+									.or_insert_with(HashMap::new)
+									.insert(v.name.clone(), body.clone());
+							}
+						}
+					}
+				},
 				_ => {},
 			}
 		}
 
-		// ------------------------------------------------------------------
-		// pass 1b – harvest every class’ verbs so we can attach them to
-		//           objects that declare `class  <name>;` later on
-		// ------------------------------------------------------------------
-		let mut class_verbs: HashMap<String, HashMap<String, &'a Block>> = HashMap::new();
-
-		for tl in ast {
-			if let TopLevel::Class(c) = tl {
-				let mut vmap = HashMap::new();
-				for st in &c.body.statements {
-					if let Statement::Verb(v) = st {
-						if let Some(body) = &v.body {
-							vmap.insert(v.name.clone(), body); // <-- NO extra ‘v’
-						}
-					}
-				}
-				class_verbs.insert(c.name.clone(), vmap);
-			}
-		}
-
-
+		// Pass 2 – build objects
 		let mut objects = HashMap::new();
 		let mut object_names = HashMap::new();
 
@@ -224,7 +280,7 @@ impl<'a> Interpreter<'a> {
 				let id_num = match consts.get(&o.id) {
 					Some(Value::Number(n)) => *n,
 					_ => {
-						eprintln!("[warn] object id {} has no #define – using 0", o.id);
+						web_sys::console::warn_1(&JsValue::from_str(&format!("[warn] object id {} has no #define – using 0", o.id)));
 						0
 					},
 				};
@@ -234,11 +290,12 @@ impl<'a> Interpreter<'a> {
 				let mut init_room = 0;
 				let mut init_state = 0;
 				let mut has_init_room = false;
+				let mut costume = None;
 
 				for st in &o.body.statements {
 					match st {
 						Statement::Verb(v) if v.body.is_some() => {
-							verbs.insert(v.name.clone(), v.body.as_ref().unwrap());
+							verbs.insert(v.name.clone(), v.body.as_ref().unwrap().clone());
 						},
 						Statement::PropertyAssignment(p) if p.name == "initialRoom" => {
 							init_room = match &p.value {
@@ -251,6 +308,13 @@ impl<'a> Interpreter<'a> {
 							};
 							has_init_room = true;
 						},
+						Statement::PropertyAssignment(p) if p.name == "costume" => {
+							costume = match &p.value {
+								PropertyValue::Number(n) => Some(*n as i32),
+								PropertyValue::Identifier(ident) => consts.get(ident).and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None }),
+								_ => None,
+							};
+						},
 						Statement::ClassDeclaration(name) => declared_classes.push(name.clone()),
 						Statement::State(s) => init_state = s.number,
 						_ => {},
@@ -262,7 +326,7 @@ impl<'a> Interpreter<'a> {
 					if let Some(cverbs) = class_verbs.get(&cname) {
 						for (vname, block) in cverbs {
 							// object-level verb overrides class verb with same name
-							verbs.entry(vname.clone()).or_insert(*block);
+							verbs.entry(vname.clone()).or_insert(block.clone());
 						}
 					} else {
 						eprintln!("[warn] class '{}' not found", cname);
@@ -283,6 +347,7 @@ impl<'a> Interpreter<'a> {
 					verbs,
 					init_room,
 					init_state,
+					costume,
 				};
 				objects.insert(id_num, def);
 			}
@@ -301,191 +366,64 @@ impl<'a> Interpreter<'a> {
 			object_names.insert(def.name.to_lowercase(), *id);
 		}
 
-		// Spawn script with ID 1 (ROOM_ID) as entry point, or fallback to first script
-		let mut tasks = VecDeque::new();
-
-		// Try to find script with ID "1" first (ROOM_ID convention)
-		let entry_script = scripts
+		scripts
 			.get("1")
 			.or_else(|| scripts.get("ROOM_ID"))
-			.or_else(|| scripts.iter().next().map(|(_, script)| script));
+			.or_else(|| scripts.iter().next().map(|(_, script)| script))
+			.map(|script| script.name.clone());
 
-		if let Some(scr) = entry_script {
-			let script_name = scripts
-				.iter()
-				.find(|(_, script)| std::ptr::eq(*script, scr))
-				.map(|(name, _)| name.as_str())
-				.unwrap_or("unknown");
-			eprintln!("[info] starting script {script_name}");
-			tasks.push_back(Task::new(&scr.body));
+		let this = Self {
+			builtins: Rc::new(build_builtins()),
+			scripts: Rc::new(scripts),
+			consts: Rc::new(consts),
+			world: Rc::new(RefCell::new(world)),
+			objects: Rc::new(objects),
+			object_names: Rc::new(object_names),
+			web_interface: WebInterface::new().unwrap(),
+			run_queue: Rc::new(RefCell::new(VecDeque::new())),
+		};
+
+		// Spawn initial script
+		// Looks for a script with ID 1 (ROOM_ID), fallsback to first script
+		let entry_script = if this.scripts.contains_key("1") {
+			Some("1".to_owned())
+		} else if this.scripts.contains_key("ROOM_ID") {
+			Some("ROOM_ID".to_owned())
+		} else {
+			// Fallback to first script if no entry point is defined
+			this.scripts.iter().next().map(|(name, _)| name.clone())
+		};
+
+		if let Some(script_name) = entry_script {
+			this.spawn_script(&script_name);
 		}
 
-		let mut this = Self {
-			tasks,
-			builtins: HashMap::new(),
-			scripts,
-			consts,
-			world,
-			objects,
-			object_names,
-		};
-		this.install_builtins();
 		this
 	}
 
 	// --------------------------------------------------
-	// Built‑ins
+	// Web interface initialization
 	// --------------------------------------------------
-	fn install_builtins(&mut self) {
-		use Value::*;
+	pub fn init_web_interface(&self) -> Result<(), JsValue> {
+		// Create divs for all objects in the current room
+		for (id, def) in &*self.objects {
+			if def.init_room == self.world.borrow().current_room || def.init_room == 1 {
+				let object_div = self.web_interface.create_object_div(def, def.init_room)?;
+				self.web_interface.room_container.append_child(&object_div)?;
 
-		self.builtins.insert("print".into(), |_, _, args| {
-			for v in args {
-				print!("{}", v.as_string());
+				// Hide objects that are initially not in room (initialRoom 0)
+				if def.init_room == 0 {
+					self.web_interface.hide_object(*id)?;
+				}
 			}
-			println!();
-			Null
-		});
-
-		self.builtins.insert("wait".into(), |_, task, mut args| {
-			let ticks = args.pop().unwrap_or(Number(1)).as_number();
-			task.delay = ticks as u32;
-			Null
-		});
-
-		self.builtins.insert("breakHere".into(), |_, task, _| {
-			task.delay = 1; // yield for one tick
-			Null
-		});
-
-		self.builtins.insert("sayLine".into(), |_, _, args| {
-			if args.len() >= 2 {
-				let txt = args[1].as_string();
-				println!("{}", txt.trim_matches('"'));
-			}
-			Null
-		});
-
-		self.builtins.insert("prompt".into(), |_, _, args| {
-			let msg = args.first().map(|v| v.as_string()).unwrap_or_default();
-			print!("{}", msg.trim_matches('"'));
-			io::stdout().flush().ok();
-			let mut input = String::new();
-			io::stdin().read_line(&mut input).ok();
-			Value::Str(input.trim().to_string())
-		});
-
-		self.builtins.insert("startScript".into(), |interp, _, mut args| {
-			if let Some(id) = args.pop() {
-				interp.spawn_script_value(id);
-			}
-			Null
-		});
-
-		// ---- World manipulation stubs ----
-		self.builtins.insert("putActorInRoom".into(), |interp, _, args| {
-			if args.len() >= 2 {
-				let actor = interp.to_id(&args[0]);
-				let room = interp.to_id(&args[1]);
-				interp.world.object_room.insert(actor, room);
-				println!("[actor {actor}] appears in room {room}");
-			}
-			Null
-		});
-
-		self.builtins.insert("putActor".into(), |_, _, args| {
-			if args.len() >= 3 {
-				println!("[actor {}] placed at {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
-			}
-			Null
-		});
-		self.builtins.insert("setCameraAt".into(), |_, _, args| {
-			if args.len() >= 2 {
-				println!("[camera] room {} target x {}", args[0].as_string(), args[1].as_string());
-			}
-			Null
-		});
-		self.builtins.insert("walkActorTo".into(), |_, _, args| {
-			if args.len() >= 3 {
-				println!("[actor {}] walks to {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
-			}
-			Null
-		});
-		self.builtins.insert("faceActor".into(), |_, _, args| {
-			if args.len() >= 2 {
-				println!("[actor {}] faces dir {}", args[0].as_string(), args[1].as_string());
-			}
-			Null
-		});
-
-		self.builtins.insert("getState".into(), |interp, _, args| {
-			if let Some(obj) = args.first() {
-				let id = interp.to_id(obj);
-				let state = interp.world.object_state.get(&id).copied().unwrap_or(0);
-				Value::Number(state as i32)
-			} else {
-				Null
-			}
-		});
-
-		self.builtins.insert("setState".into(), |interp, _, args| {
-			if args.len() >= 2 {
-				let obj = interp.to_id(&args[0]);
-				let val = args[1].as_number() as u32;
-				interp.world.object_state.insert(obj, val);
-				println!("[object {obj}] state set to {val}");
-			}
-			Null
-		});
-
-		self.builtins.insert("objectInHand".into(), |interp, _, args| {
-			if let Some(obj) = args.first() {
-				let id = interp.to_id(obj);
-				Value::Bool(interp.world.inventory.contains(&id))
-			} else {
-				Value::Bool(false)
-			}
-		});
-
-		self.builtins.insert("addToInventory".into(), |interp, _, args| {
-			if let Some(obj) = args.first() {
-				let id = interp.to_id(obj);
-				interp.world.inventory.insert(id);
-				println!("[inventory] added object {id}");
-			}
-			Null
-		});
-
-		self.builtins.insert("pickupObject".into(), |interp, _, args| {
-			if let Some(obj) = args.first() {
-				let id = interp.to_id(obj);
-				interp.world.inventory.insert(id);
-				println!("You pick up object {id}");
-			}
-			Null
-		});
-
-		self.builtins.insert("animateObject".into(), |_, _, args| {
-			if args.len() >= 2 {
-				println!("[object {}] plays anim {}", args[0].as_string(), args[1].as_string());
-			}
-			Null
-		});
-
-		self.builtins.insert("loadRoom".into(), |interp, _, args| {
-			if let Some(room) = args.first() {
-				let id = interp.to_id(room);
-				println!("[game] loading room {id} – thanks for playing!");
-				interp.tasks.clear(); // stop
-			}
-			Null
-		});
+		}
+		Ok(())
 	}
 
 	// --------------------------------------------------
 	// Script spawning helpers
 	// --------------------------------------------------
-	fn spawn_script_value(&mut self, v: Value) {
+	fn spawn_script_value(&self, v: Value) {
 		match v {
 			Value::Number(n) => self.spawn_script(&n.to_string()),
 			Value::Str(s) => self.spawn_script(&s),
@@ -493,10 +431,28 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
-	fn spawn_script(&mut self, key: &str) {
+	fn spawn_script(&self, key: &str) {
 		if let Some(scr) = self.scripts.get(key) {
 			eprintln!("[info] startScript -> {}", key);
-			self.tasks.push_back(Task::new(&scr.body));
+			let ctx = Ctx {
+				vars: Rc::new(RefCell::new(HashMap::new())),
+				delay: Rc::new(RefCell::new(0)),
+				interpreter: self.clone(),
+			};
+			let script = scr.clone();
+			let key = key.to_string();
+			let cloned_ctx = ctx.clone();
+			let task = Task {
+				fut: Box::pin(async move {
+					if let Err(err) = script.body.exec(&ctx).await {
+						web_sys::console::error_1(&JsValue::from_str(&format!("Error executing script {}: {:?}", key, err)));
+					} else {
+						web_sys::console::log_1(&JsValue::from_str(&format!("Script {} executed successfully", key)));
+					}
+				}),
+				ctx: cloned_ctx,
+			};
+			self.run_queue.borrow_mut().push_back(task);
 		} else {
 			eprintln!("[warn] startScript: unknown script {key}");
 		}
@@ -517,9 +473,56 @@ impl<'a> Interpreter<'a> {
 	}
 
 	// --------------------------------------------------
-	// Run until no runnable tasks remain
+	// Web-specific tick method
+	// Performs a single tick of the interpreter
+	// This is intended to be called once per animation frame
 	// --------------------------------------------------
-	pub fn run(&mut self) {
+	pub fn tick_web(&self) {
+		// The entry script may have changed the room already
+		if self.world.borrow().current_room == 0 {
+			self.world.borrow_mut().current_room = 1;
+		}
+
+		web_sys::console::log_1(&JsValue::from_str(
+			format!("Ticking interpreter with {} tasks", self.run_queue.borrow().len()).as_str(),
+		));
+
+		//---------------------------------------------------------------
+		// Run each runnable task *once* (co-operative multitasking)
+		//---------------------------------------------------------------
+		let mut n = self.run_queue.borrow().len();
+
+		while n > 0 {
+			let mut task = self.run_queue.borrow_mut().pop_front().unwrap();
+			//let mut task = self.tasks.pop_front().unwrap();
+			n -= 1;
+
+			// Check if the task has a delay
+			if *task.ctx.delay.borrow() > 0 {
+				*task.ctx.delay.borrow_mut() -= 1;
+				self.run_queue.borrow_mut().push_back(task);
+				continue;
+			}
+
+			// Continue the task
+			match task.fut.as_mut().poll(&mut std::task::Context::from_waker(&futures::task::noop_waker_ref())) {
+				std::task::Poll::Ready(()) => {
+					web_sys::console::log_1(&JsValue::from_str("Task completed"));
+				},
+				std::task::Poll::Pending => {
+					self.run_queue.borrow_mut().push_back(task);
+					continue; // Still running, continue to next task
+				},
+			}
+		}
+
+		web_sys::console::log_1(&JsValue::from_str("Interpreter finished executing scripts"));
+	}
+
+	// --------------------------------------------------
+	// Run until no runnable tasks remain (original version for terminal use)
+	// --------------------------------------------------
+	/*pub fn run(&mut self) {
 		// The entry script may have changed the room already
 		if self.world.current_room == 0 {
 			self.world.current_room = 1;
@@ -544,11 +547,11 @@ impl<'a> Interpreter<'a> {
 					Some(s) => s,
 					None => continue,
 				};
-				let act = self.exec_stmt(stmt_ref, &mut task);
+				let act = self.exec_stmt(stmt_ref.clone(), &mut task);
 				task.ip += 1;
 				if let Action::Splice { at, items } = act {
 					for (i, s) in items.into_iter().enumerate() {
-						task.stmts.insert(at + i, s);
+						task.stmts.insert(at + i, s.clone());
 					}
 				}
 				if task.ip < task.stmts.len() {
@@ -633,182 +636,16 @@ impl<'a> Interpreter<'a> {
 				self.run_verb(obj_id, verb_name, None);
 			}
 		}
-	}
-
-
-	// --------------------------------------------------
-	// Execute a single statement, returning structural changes
-	// --------------------------------------------------
-	fn exec_stmt(&mut self, stmt: &'a Statement, task: &mut Task<'a>) -> Action<'a> {
-		match stmt {
-			// ---- nested block ----
-			Statement::Block(b) => {
-				if b.statements.is_empty() {
-					Action::None
-				} else {
-					Action::Splice {
-						at: task.ip + 1,
-						items: b.statements.iter().collect(),
-					}
-				}
-			},
-			// ---- expr & var ----
-			Statement::Expression(e) => {
-				self.eval_expr(e, task);
-				Action::None
-			},
-			Statement::VariableDeclaration(v) => {
-				let val = self.eval_expr(&v.value, task);
-				task.env.set(v.name.clone(), val);
-				Action::None
-			},
-			// ---- IF ----
-			Statement::If(ifst) => {
-				let chosen: &Block = if self.eval_expr(&ifst.condition, task).truthy() {
-					&ifst.then_block
-				} else if let Some(ref else_block) = ifst.else_block {
-					else_block
-				} else {
-					return Action::None;
-				};
-				if chosen.statements.is_empty() {
-					Action::None
-				} else {
-					Action::Splice {
-						at: task.ip + 1,
-						items: chosen.statements.iter().collect(),
-					}
-				}
-			},
-			// ---- WHILE ----
-			Statement::While(wh) => {
-				if self.eval_expr(&wh.condition, task).truthy() {
-					let mut items: Vec<&'a Statement> = wh.body.statements.iter().collect();
-					items.push(stmt); // loop back
-					Action::Splice { at: task.ip + 1, items }
-				} else {
-					Action::None
-				}
-			},
-			// Everything else (class / verb / etc.) is no‑op at run‑time for now.
-			_ => Action::None,
-		}
-	}
-
-	// --------------------------------------------------
-	// Expression evaluation
-	// --------------------------------------------------
-	fn eval_expr(&mut self, expr: &'a Expression, task: &mut Task<'a>) -> Value {
-		use Expression::*;
-		match expr {
-			Primary(p) => self.eval_primary(p, task),
-			Assignment(lhs, rhs) => {
-				if let Expression::Primary(crate::ast::Primary::Identifier(name)) = &**lhs {
-					let v = self.eval_expr(rhs, task);
-					task.env.set(name.clone(), v.clone());
-					v
-				} else {
-					Value::Null
-				}
-			},
-			LogicalOr(a, b) => {
-				let av = self.eval_expr(a, task);
-				if av.truthy() { av } else { self.eval_expr(b, task) }
-			},
-			LogicalAnd(a, b) => {
-				let av = self.eval_expr(a, task);
-				if !av.truthy() { av } else { self.eval_expr(b, task) }
-			},
-			Equality(a, op, b) => Value::Bool(match op {
-				EqualityOp::Equal => self.eval_expr(a, task) == self.eval_expr(b, task),
-				EqualityOp::NotEqual => self.eval_expr(a, task) != self.eval_expr(b, task),
-			}),
-			Comparison(a, op, b) => {
-				let av = self.eval_expr(a, task).as_number();
-				let bv = self.eval_expr(b, task).as_number();
-				Value::Bool(match op {
-					ComparisonOp::Less => av < bv,
-					ComparisonOp::Greater => av > bv,
-					ComparisonOp::LessEqual => av <= bv,
-					ComparisonOp::GreaterEqual => av >= bv,
-				})
-			},
-			Term(a, op, b) => {
-				let av = self.eval_expr(a, task).as_number();
-				let bv = self.eval_expr(b, task).as_number();
-				Value::Number(match op {
-					TermOp::Add => av + bv,
-					TermOp::Subtract => av - bv,
-				})
-			},
-			Factor(a, op, b) => {
-				let av = self.eval_expr(a, task).as_number();
-				let bv = self.eval_expr(b, task).as_number();
-				Value::Number(match op {
-					FactorOp::Multiply => av * bv,
-					FactorOp::Divide => av / bv,
-				})
-			},
-			Unary(u, e) => {
-				let v = self.eval_expr(e, task);
-				match u {
-					UnaryOp::Not => Value::Bool(!v.truthy()),
-					UnaryOp::Negate => Value::Number(-v.as_number()),
-				}
-			},
-		}
-	}
-
-	fn eval_primary(&mut self, prim: &'a crate::ast::Primary, task: &mut Task<'a>) -> Value {
-		match prim {
-			crate::ast::Primary::Number(n) => Value::Number(*n as i32),
-			crate::ast::Primary::String(s) => Value::Str(s.clone()),
-			crate::ast::Primary::Identifier(id) => {
-				if let Some(v) = task.env.get(id) {
-					v
-				} else if let Some(c) = self.consts.get(id) {
-					c.clone()
-				} else {
-					// Treat unknown identifier as its literal name (useful for script symbols)
-					Value::Str(id.clone())
-				}
-			},
-			crate::ast::Primary::Parenthesized(expr) => self.eval_expr(expr, task),
-			crate::ast::Primary::FunctionCall(fc) => {
-				let args = fc.arguments.iter().map(|e| self.eval_expr(e, task)).collect::<Vec<_>>();
-				if let Some(f) = self.builtins.get(&fc.name) {
-					f(self, task, args)
-				} else {
-					println!("[warn] unknown function {}", fc.name);
-					Value::Null
-				}
-			},
-		}
-	}
-
-	fn run_verb(&mut self, obj_id: i32, verb: &str, maybe_target: Option<i32>) -> bool {
-		if let Some(def) = self.objects.get(&obj_id) {
-			if let Some(block) = def.verbs.get(verb) {
-				let mut t = Task::new(block);
-				t.env.set("this".into(), Value::Number(obj_id));
-				if let Some(tgt) = maybe_target {
-					t.env.set("verbObj".into(), Value::Number(tgt));
-				}
-				self.tasks.push_back(t);
-				return true; // ――― found & queued
-			}
-		}
-		false // ――― no such verb here
-	}
+	}*/
 
 
 	fn describe_room(&self) {
 		println!();
-		println!("You are in room {}.", self.world.current_room);
+		println!("You are in room {}.", self.world.borrow().current_room);
 		let here: Vec<&ObjectDef> = self
 			.objects
 			.values()
-			.filter(|o| self.world.object_room.get(&o.id) == Some(&self.world.current_room))
+			.filter(|o| self.world.borrow().object_room.get(&o.id) == Some(&self.world.borrow().current_room))
 			.collect();
 		if here.is_empty() {
 			println!("Nothing of interest here.");
@@ -825,14 +662,351 @@ impl<'a> Interpreter<'a> {
 	}
 }
 
+
+// --------------------------------------------------
+// Built‑ins
+// --------------------------------------------------
+pub fn builtin_async<F>(f: F) -> Rc<BuiltinFn>
+where
+	F: 'static + for<'a> Fn(Vec<Value>, &'a Ctx) -> LocalBoxFuture<'a, Value>,
+{
+	Rc::new(move |args, ctx| f(args, ctx))
+}
+
+
+fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
+	use Value::*;
+	let mut builtins: HashMap<String, Rc<BuiltinFn>> = HashMap::new();
+
+	builtins.insert(
+		"print".into(),
+		builtin_async(|args, _| {
+			async move {
+				for v in args {
+					web_sys::console::log_1(&JsValue::from_str(&v.as_string()));
+				}
+				web_sys::console::log_1(&JsValue::from_str("")); // add a newline
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"wait".into(),
+		builtin_async(|mut args, ctx| {
+			async move {
+				let ticks = args.pop().unwrap_or(Number(1)).as_number();
+				*ctx.delay.borrow_mut() = ticks as u32;
+				yield_now().await; // yield
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"breakHere".into(),
+		builtin_async(|_, _ctx| {
+			async move {
+				web_sys::console::log_1(&JsValue::from_str("Break here called!"));
+				yield_now().await; // stop right here, resume next tick
+				Value::Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"sayLine".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if args.len() >= 2 {
+					let txt = args[1].as_string();
+					let message = txt.trim_matches('"');
+
+					ctx.interpreter.web_interface.display_message(message).unwrap_or_else(|_| {
+						web_sys::console::log_1(&JsValue::from_str(message));
+					});
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"prompt".into(),
+		builtin_async(|args, _| {
+			async move {
+				let msg = args.first().map(|v| v.as_string()).unwrap_or_default();
+				let prompt_text = msg.trim_matches('"');
+
+				// Use web prompt API
+				let window = web_sys::window().unwrap();
+				if let Ok(Some(result)) = window.prompt_with_message(prompt_text) {
+					Value::Str(result)
+				} else {
+					Value::Str(String::new())
+				}
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"startScript".into(),
+		builtin_async(|mut args, ctx| {
+			async move {
+				if let Some(id) = args.pop() {
+					ctx.interpreter.spawn_script_value(id);
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	// ---- World manipulation stubs ----
+	builtins.insert(
+		"putActorInRoom".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if args.len() >= 2 {
+					let actor = ctx.interpreter.to_id(&args[0]);
+					let room = ctx.interpreter.to_id(&args[1]);
+					ctx.interpreter.world.borrow_mut().object_room.insert(actor, room);
+
+					if room == ctx.interpreter.world.borrow().current_room {
+						ctx.interpreter.web_interface.show_object(actor, room).unwrap_or_else(|e| {
+							web_sys::console::error_1(&JsValue::from_str(&format!("Error showing object: {:?}", e)));
+						});
+					}
+
+					web_sys::console::log_1(&JsValue::from_str(&format!("[actor {actor}] appears in room {room}")));
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"putActor".into(),
+		builtin_async(|args, _| {
+			async move {
+				if args.len() >= 3 {
+					println!("[actor {}] placed at {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+	builtins.insert(
+		"setCameraAt".into(),
+		builtin_async(|args, _| {
+			async move {
+				if args.len() >= 2 {
+					println!("[camera] room {} target x {}", args[0].as_string(), args[1].as_string());
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+	builtins.insert(
+		"walkActorTo".into(),
+		builtin_async(|args, _| {
+			async move {
+				if args.len() >= 3 {
+					println!("[actor {}] walks to {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+	builtins.insert(
+		"faceActor".into(),
+		builtin_async(|args, _| {
+			async move {
+				if args.len() >= 2 {
+					println!("[actor {}] faces dir {}", args[0].as_string(), args[1].as_string());
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"getState".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if let Some(obj) = args.first() {
+					let id = ctx.interpreter.to_id(obj);
+					let state = ctx.interpreter.world.borrow().object_state.get(&id).copied().unwrap_or(0);
+					Value::Number(state as i32)
+				} else {
+					Null
+				}
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"setState".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if args.len() >= 2 {
+					let obj = ctx.interpreter.to_id(&args[0]);
+					let val = args[1].as_number() as u32;
+					ctx.interpreter.world.borrow_mut().object_state.insert(obj, val);
+
+					// Log to web console and potentially update visual state
+					web_sys::console::log_1(&JsValue::from_str(&format!("[object {obj}] state set to {val}")));
+
+					// Future enhancement: update object visual appearance based on state
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"objectInHand".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if let Some(obj) = args.first() {
+					let id = ctx.interpreter.to_id(obj);
+					Value::Bool(ctx.interpreter.world.borrow().inventory.contains(&id))
+				} else {
+					Value::Bool(false)
+				}
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"addToInventory".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if let Some(obj) = args.first() {
+					let id = ctx.interpreter.to_id(obj);
+					ctx.interpreter.world.borrow_mut().inventory.insert(id);
+
+					// Log to web console and potentially update inventory display
+					web_sys::console::log_1(&JsValue::from_str(&format!("[inventory] added object {id}")));
+
+					// Future enhancement: update visual inventory display
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"pickupObject".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if let Some(obj) = args.first() {
+					let id = ctx.interpreter.to_id(obj);
+					ctx.interpreter.world.borrow_mut().inventory.insert(id);
+
+					// Remove object from room and hide it in web interface
+					ctx.interpreter.web_interface.hide_object(id).unwrap_or_else(|e| {
+						web_sys::console::error_1(&JsValue::from_str(&format!("Error hiding object: {:?}", e)));
+					});
+
+					web_sys::console::log_1(&JsValue::from_str(&format!("You pick up object {id}")));
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"animateObject".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if args.len() >= 2 {
+					let obj_id = ctx.interpreter.to_id(&args[0]);
+					let anim_id = args[1].as_number();
+
+					// Log animation and potentially trigger visual effect
+					web_sys::console::log_1(&JsValue::from_str(&format!("[object {obj_id}] plays anim {anim_id}")));
+
+					// Future enhancement: add CSS animation or transform to the object div
+					if let Some(obj_div) = ctx.interpreter.web_interface.document.get_element_by_id(&format!("object-{}", obj_id)) {
+						// Simple bounce animation for now
+						obj_div
+							.set_attribute(
+								"style",
+								&format!("{}; animation: bounce 0.5s ease-in-out;", obj_div.get_attribute("style").unwrap_or_default()),
+							)
+							.unwrap_or_else(|e| {
+								web_sys::console::error_1(&JsValue::from_str(&format!("Error animating object: {:?}", e)));
+							});
+					}
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"loadRoom".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if let Some(room) = args.first() {
+					let id = ctx.interpreter.to_id(room);
+					println!("[game] loading room {id} – thanks for playing!");
+					ctx.interpreter.run_queue.borrow_mut().clear(); // stop
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins
+}
+
+
+#[derive(Debug)]
+#[must_use = "must await or poll this future"]
+pub struct YieldNow(bool);
+
+impl Future for YieldNow {
+	type Output = ();
+
+	fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+		if !self.0 {
+			self.0 = true;
+			cx.waker().wake_by_ref();
+			std::task::Poll::Pending
+		} else {
+			std::task::Poll::Ready(())
+		}
+	}
+}
+
+
+pub fn yield_now() -> YieldNow {
+	YieldNow(false)
+}
+
+
 // ---------------------------------------------------------------------------
 // Convenience wrapper
 // ---------------------------------------------------------------------------
-
-pub fn run_scripts(ast: &[TopLevel]) {
-	let mut i = Interpreter::new(ast);
-	i.run();
-}
 
 
 fn user_verb_to_scumm(cmd: &str) -> &'static str {

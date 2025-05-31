@@ -94,3 +94,34 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Game-specific styles */
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.game-container {
+  position: relative;
+  width: 800px;
+  height: 600px;
+  border: 2px solid #666;
+  background: #222;
+  margin: 20px auto;
+}
+
+.game-object {
+  transition: transform 0.2s ease-in-out;
+}
+
+.game-object:hover {
+  transform: scale(1.1);
+  border-color: #fff !important;
+}
+
+/* Message display styles */
+#game-message {
+  font-size: 14px;
+  max-width: 600px;
+  word-wrap: break-word;
+}

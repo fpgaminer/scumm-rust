@@ -2,17 +2,17 @@ mod ast;
 mod interpreter;
 mod preprocessor;
 
-use anyhow::{Context, Result};
-use wasm_bindgen::prelude::*;
-use web_sys::{window, Response};
-use wasm_bindgen_futures::{spawn_local, JsFuture};
+use anyhow::Result;
 use ast::{
 	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Script, ScriptName, StateStatement, Statement,
 	TopLevel, VariableDeclaration, VerbStatement, WhileStatement,
 };
 use pest::Parser;
 use preprocessor::preprocess;
-use std::{env, path::Path};
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::{JsFuture, spawn_local};
+use web_sys::Response;
+
 
 #[derive(pest_derive::Parser)]
 #[grammar = "grammar.pest"]
@@ -361,19 +361,17 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 
 
 pub async fn load_script_raw() -> Result<String, JsValue> {
-    let resp_value = JsFuture::from(
-        window().unwrap().fetch_with_str("/example.sc")
-    )
-    .await?;
+	let resp_value = JsFuture::from(window().fetch_with_str("/example.sc")).await?;
 
-    let resp: Response = resp_value.dyn_into()?;
-    let text = JsFuture::from(resp.text()?).await?;
-    Ok(text.as_string().unwrap())
+	let resp: Response = resp_value.dyn_into()?;
+	let text = JsFuture::from(resp.text()?).await?;
+	Ok(text.as_string().unwrap())
 }
 
 
 #[wasm_bindgen]
 pub fn start() {
+	set_panic_hook();
 	web_sys::console::log_1(&JsValue::from_str("Starting Scumm Script Parser..."));
 	spawn_local(async {
 		match load_script_raw().await {
@@ -381,7 +379,7 @@ pub fn start() {
 				handle_script(source.as_bytes())
 					.map_err(|e| web_sys::console::error_1(&JsValue::from_str(&e.to_string())))
 					.unwrap_or(());
-			}
+			},
 			Err(err) => web_sys::console::error_1(&err),
 		}
 	});
@@ -480,24 +478,65 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 		}
 	}
 
-	//println!("Parsed successfully! AST nodes: {:#?}", ast_nodes);
 	web_sys::console::log_1(&JsValue::from_str(&format!("Parsed successfully! AST nodes: {:?}", ast_nodes)));
 
-	//interpreter::run_scripts(&ast_nodes);
+	// Run the interpreter with web interface
+	let interpreter = interpreter::Interpreter::new(&ast_nodes);
+
+	// Initialize web interface
+	if let Err(e) = interpreter.init_web_interface() {
+		web_sys::console::error_1(&JsValue::from_str(&format!("Failed to initialize web interface: {:?}", e)));
+		return Err(anyhow::anyhow!("Web interface initialization failed"));
+	}
+
+	let tick_closure = {
+		Closure::<dyn FnMut()>::new(move || {
+			interpreter.tick_web();
+		})
+	};
+
+	// one tick per second (for debugging purposes)
+	window()
+		.set_interval_with_callback_and_timeout_and_arguments_0(tick_closure.as_ref().unchecked_ref(), 1000)
+		.expect("should register `setInterval` OK");
+
+	tick_closure.forget(); // Prevent closure from being dropped
+
+	//let f = Rc::new(RefCell::new(None));
+	//let g = f.clone();
+
+	//*g.borrow_mut() = Some(Closure::new(move || {
+	//	interpreter.tick_web();
+
+	//	request_animation_frame(f.borrow().as_ref().unwrap());
+	//}));
+
+	//request_animation_frame(g.borrow().as_ref().unwrap());
 
 	Ok(())
 }
 
 
+fn window() -> web_sys::Window {
+	web_sys::window().expect("no global `window` exists")
+}
+
+fn request_animation_frame(f: &Closure<dyn FnMut()>) {
+	window()
+		.request_animation_frame(f.as_ref().unchecked_ref())
+		.expect("should register `requestAnimationFrame` OK");
+}
+
+
 pub fn set_panic_hook() {
-    // When the `console_error_panic_hook` feature is enabled, we can call the
-    // `set_panic_hook` function at least once during initialization, and then
-    // we will get better error messages if our code ever panics.
-    //
-    // For more details see
-    // https://github.com/rustwasm/console_error_panic_hook#readme
-    #[cfg(feature = "console_error_panic_hook")]
-    console_error_panic_hook::set_once();
+	// When the `console_error_panic_hook` feature is enabled, we can call the
+	// `set_panic_hook` function at least once during initialization, and then
+	// we will get better error messages if our code ever panics.
+	//
+	// For more details see
+	// https://github.com/rustwasm/console_error_panic_hook#readme
+	#[cfg(feature = "console_error_panic_hook")]
+	console_error_panic_hook::set_once();
 }
 
 

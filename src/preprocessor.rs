@@ -1,7 +1,4 @@
-use std::{
-	collections::HashSet,
-	fs,
-};
+use std::{collections::HashSet, fs};
 
 use anyhow::{Context, Result, anyhow};
 
@@ -28,9 +25,12 @@ fn inline_file(filename: &str, src: &str, visited: &mut HashSet<String>) -> Resu
 			let second_q = after.find('"').ok_or_else(|| malformed(lineno, line))?;
 			let include_name = &after[..second_q];
 
-			let flattened = inline_file(include_name, &fs::read_to_string(include_name)
-				.with_context(|| format!("Failed to read included file: {}", include_name))?, visited)
-				.with_context(|| format!("Error processing include: {}", include_name))?;
+			let flattened = inline_file(
+				include_name,
+				&fs::read_to_string(include_name).with_context(|| format!("Failed to read included file: {}", include_name))?,
+				visited,
+			)
+			.with_context(|| format!("Error processing include: {}", include_name))?;
 			out.push_str(&flattened);
 		} else {
 			out.push_str(line);

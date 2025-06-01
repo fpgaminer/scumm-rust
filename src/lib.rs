@@ -521,6 +521,7 @@ fn window() -> web_sys::Window {
 	web_sys::window().expect("no global `window` exists")
 }
 
+#[allow(dead_code)]
 fn request_animation_frame(f: &Closure<dyn FnMut()>) {
 	window()
 		.request_animation_frame(f.as_ref().unchecked_ref())

@@ -17,9 +17,10 @@ use web_sys::{Document, Element};
 // ---------------------------------------------------------------------------
 struct ObjectDef {
 	id: i32,
-	name: String,                  // human readable name
+	name: String, // human readable name
+	#[allow(dead_code)]
 	verbs: HashMap<String, Block>, // vLook, vOpen, …
-	init_room: i32,                // 0 = nowhere / inventory only
+	init_room: i32, // 0 = nowhere / inventory only
 	init_state: u32,
 	costume: Option<i32>, // costume number for visual display
 }
@@ -54,7 +55,7 @@ impl WebInterface {
 		game_container.set_attribute("id", "game-container")?;
 		game_container.set_attribute(
 			"style",
-			"position: relative; width: 640px; height: 480px; background: #000; margin: 0 auto; border: 2px solid #333;",
+			"position: relative; width: 640px; height: 480px; background: #000 url('room1.png') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
 		)?;
 
 		// Create room container for objects
@@ -78,7 +79,7 @@ impl WebInterface {
 		})
 	}
 
-	fn create_object_div(&self, object_def: &ObjectDef, room_id: i32) -> Result<Element, JsValue> {
+	fn create_object_div(&self, object_def: &ObjectDef, _room_id: i32) -> Result<Element, JsValue> {
 		let div = self.document.create_element("div")?;
 		div.set_attribute("id", &format!("object-{}", object_def.id))?;
 		div.set_attribute("class", "game-object")?;
@@ -113,7 +114,7 @@ impl WebInterface {
 		Ok(div)
 	}
 
-	fn show_object(&self, object_id: i32, room_id: i32) -> Result<(), JsValue> {
+	fn show_object(&self, object_id: i32, _room_id: i32) -> Result<(), JsValue> {
 		if let Some(div) = self.document.get_element_by_id(&format!("object-{}", object_id)) {
 			div.set_attribute("style", &div.get_attribute("style").unwrap_or_default().replace("display: none;", ""))?;
 		}
@@ -216,9 +217,10 @@ pub struct Interpreter {
 	scripts: Rc<HashMap<String, Script>>,
 	pub consts: Rc<HashMap<String, Value>>,
 	world: Rc<RefCell<World>>,
-	objects: Rc<HashMap<i32, ObjectDef>>,   // id → def
+	objects: Rc<HashMap<i32, ObjectDef>>, // id → def
+	#[allow(dead_code)]
 	object_names: Rc<HashMap<String, i32>>, // lowercase name → id  (for parser)
-	web_interface: WebInterface,            // Web DOM interface
+	web_interface: WebInterface,          // Web DOM interface
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
 }
 
@@ -639,6 +641,7 @@ impl Interpreter {
 	}*/
 
 
+	#[allow(dead_code)]
 	fn describe_room(&self) {
 		println!();
 		println!("You are in room {}.", self.world.borrow().current_room);
@@ -1009,6 +1012,7 @@ pub fn yield_now() -> YieldNow {
 // ---------------------------------------------------------------------------
 
 
+#[allow(dead_code)]
 fn user_verb_to_scumm(cmd: &str) -> &'static str {
 	match cmd {
 		"look" | "examine" => "vLook",
@@ -1022,6 +1026,7 @@ fn user_verb_to_scumm(cmd: &str) -> &'static str {
 }
 
 
+#[allow(dead_code)]
 fn read_player_command() -> Option<String> {
 	print!(">> ");
 	io::stdout().flush().ok()?;

@@ -505,7 +505,7 @@ impl Interpreter {
 			}
 
 			// Continue the task
-			match task.fut.as_mut().poll(&mut std::task::Context::from_waker(&futures::task::noop_waker_ref())) {
+			match task.fut.as_mut().poll(&mut std::task::Context::from_waker(futures::task::noop_waker_ref())) {
 				std::task::Poll::Ready(()) => {
 					web_sys::console::log_1(&JsValue::from_str("Task completed"));
 				},

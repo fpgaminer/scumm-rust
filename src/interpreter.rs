@@ -414,24 +414,33 @@ impl Interpreter {
 		};
 
 		info!("startScript -> {}", key);
+		self.spawn_block_named(key, script);
+	}
+
+	fn spawn_block_named(&self, name: &str, block: Block) {
 		let ctx = Ctx {
 			vars: Rc::new(RefCell::new(HashMap::new())),
 			delay: Rc::new(RefCell::new(0)),
 			interpreter: self.clone(),
 		};
-		let _key = key.to_string();
+		let key = name.to_string();
 		let cloned_ctx = ctx.clone();
 		let task = Task {
 			fut: Box::pin(async move {
-				if let Err(_err) = script.exec(&ctx).await {
-					error!("Error executing script {}: {:?}", _key, _err);
+				if let Err(err) = block.exec(&ctx).await {
+					error!("Error executing block {}: {:?}", key, err);
 				} else {
-					debug!("Script {} executed successfully", _key);
+					debug!("Block {} executed successfully", key);
 				}
 			}),
 			ctx: cloned_ctx,
 		};
 		self.run_queue.borrow_mut().push_back(task);
+	}
+
+	#[allow(dead_code)]
+	fn spawn_block(&self, block: Block) {
+		self.spawn_block_named("<anon>", block);
 	}
 
 	fn to_id(&self, v: &Value) -> u32 {
@@ -805,6 +814,35 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 			async move {
 				if let Some(id) = args.pop() {
 					ctx.interpreter.spawn_script_value(id);
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
+		"startRoom".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if args.len() != 1 {
+					error!("startRoom requires exactly 1 argument");
+					return Null;
+				}
+
+				let id = ctx.interpreter.to_id(&args[0]);
+
+				let room_name = match ctx.interpreter.with_room_by_id(id, |r| r.name.clone()) {
+					Some(name) => name,
+					None => {
+						error!("startRoom called with non-room id {}", id);
+						return Null;
+					},
+				};
+
+				ctx.interpreter.world.borrow_mut().current_room = id;
+				if let Some(entry) = ctx.interpreter.with_room_by_id(id, |r| r.entry_script.clone()).flatten() {
+					ctx.interpreter.spawn_block_named(&format!("{}::entry", room_name), entry);
 				}
 				Null
 			}
@@ -1189,5 +1227,36 @@ script main() {}
 
 		// Entry scripts are stored in the room only, not as a global script
 		assert!(decls.get("entry").is_none());
+	}
+
+	#[test]
+	fn builtin_startroom_runs_entry() {
+		let src = r#"room R {
+    object O { state = 0; }
+    script entry() { setState(O, 1); }
+}
+
+script main() { startRoom(R); }
+"#;
+
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+
+		// Execute until all tasks have completed
+		for _ in 0..32 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+
+		let room_id = interp.declarations.borrow().get_index_of("R").unwrap() as u32;
+		assert_eq!(interp.world.borrow().current_room, room_id);
+
+		let obj_state = match interp.declarations.borrow().get("O").unwrap() {
+			Declaration::Object(obj) => obj.state,
+			_ => unreachable!(),
+		};
+		assert_eq!(obj_state, 1);
 	}
 }

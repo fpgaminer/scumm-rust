@@ -953,27 +953,13 @@ mod tests {
 		// Grab the context of the spawned `main` script so we can inspect its vars
 		let ctx = interp.run_queue.borrow().front().expect("no script spawned").ctx.clone();
 
-		// Tick until all tasks have completed. This replicates the
-		// interpreter loop without relying on web-specific APIs.
-		use futures::task::{Context, Poll, noop_waker_ref};
-
-		while !interp.run_queue.borrow().is_empty() {
-			let mut n = interp.run_queue.borrow().len();
-			while n > 0 {
-				let mut task = interp.run_queue.borrow_mut().pop_front().unwrap();
-				n -= 1;
-
-				if *task.ctx.delay.borrow() > 0 {
-					*task.ctx.delay.borrow_mut() -= 1;
-					interp.run_queue.borrow_mut().push_back(task);
-					continue;
-				}
-
-				match task.fut.as_mut().poll(&mut Context::from_waker(noop_waker_ref())) {
-					Poll::Ready(()) => {},
-					Poll::Pending => interp.run_queue.borrow_mut().push_back(task),
-				}
+		// Tick until all tasks have completed.
+		// Limit to 128 ticks to avoid infinite loops in tests.
+		for _ in 0..128 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
 			}
+			interp.tick_web();
 		}
 
 		ctx.vars.borrow().clone()

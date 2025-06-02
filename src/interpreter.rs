@@ -977,4 +977,31 @@ mod tests {
 		let vars = run_script("script main() {\n    int x = 1;\n    x = x + 4 * 2;\n}");
 		assert_eq!(vars.get("x"), Some(&Value::Number(9)));
 	}
+
+	#[test]
+	fn while_loop_executes() {
+		let vars = run_script("script main() {\n    int i = 0;\n    while (i < 3) { i = i + 1; }\n}");
+		assert_eq!(vars.get("i"), Some(&Value::Number(3)));
+	}
+
+	#[test]
+	fn if_else_branches() {
+		let vars = run_script("script main() {\n    int x = 0;\n    if (1 < 2) { x = 1; } else { x = 2; }\n}");
+		assert_eq!(vars.get("x"), Some(&Value::Number(1)));
+	}
+
+	#[test]
+	fn builtin_setstate_getstate() {
+		let src = "object O { state = 0; }\nscript main() {\n    int before = getState(O);\n    setState(O, 2);\n    int after = getState(O);\n}";
+		let vars = run_script(src);
+		assert_eq!(vars.get("before"), Some(&Value::Number(0)));
+		assert_eq!(vars.get("after"), Some(&Value::Number(2)));
+	}
+
+	#[test]
+	fn builtin_inventory() {
+		let src = "object O {}\nscript main() {\n    addToInventory(O);\n    bool has = objectInHand(O);\n}";
+		let vars = run_script(src);
+		assert_eq!(vars.get("has"), Some(&Value::Bool(true)));
+	}
 }

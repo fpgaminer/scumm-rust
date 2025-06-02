@@ -4,7 +4,7 @@ mod preprocessor;
 
 use anyhow::Result;
 use ast::{
-	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Room, Script, Statement, TopLevel,
+	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Room, Script, StateEntry, Statement, TopLevel,
 	VariableDeclaration, VerbStatement, WhileStatement,
 };
 use log::{debug, error, info};
@@ -123,9 +123,22 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			Some(Statement::ScriptDeclaration(Script { name, body }))
 		},
 		Rule::states_assign => {
-			// For now, skip states_assign parsing since we don't have a complete implementation
-			// This prevents parse errors but doesn't create AST nodes for states
-			None
+			let mut inner = pair.into_inner();
+			if let Some(array_pair) = inner.next() {
+				let mut states = Vec::new();
+				for entry in array_pair.into_inner() {
+					let mut ei = entry.into_inner();
+					let x: i32 = ei.next()?.as_str().parse().ok()?;
+					let y: i32 = ei.next()?.as_str().parse().ok()?;
+					let img_pair = ei.next()?;
+					let raw = img_pair.as_str();
+					let image = raw[1..raw.len() - 1].to_string();
+					states.push(StateEntry { x, y, image });
+				}
+				Some(Statement::States(states))
+			} else {
+				None
+			}
 		},
 		_ => None,
 	}

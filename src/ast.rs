@@ -77,6 +77,9 @@ impl Object {
 				Statement::PropertyAssignment(prop) => {
 					anyhow::bail!("Unsupported property assignment in object definition: {:?}", prop);
 				},
+				Statement::ClassAssignment(class_names) => {
+					obj.classes = class_names.clone();
+				}
 				Statement::Verb(verb_stmt) => {
 					if let Some(body) = &verb_stmt.body {
 						obj.verbs.insert(verb_stmt.name.clone(), body.clone());
@@ -187,7 +190,7 @@ pub enum Statement {
 	Expression(Expression),
 	If(IfStatement),
 	While(WhileStatement),
-	ClassDeclaration(String),
+	ClassAssignment(Vec<String>),
 	Verb(VerbStatement),
 	VariableDeclaration(VariableDeclaration),
 	PropertyAssignment(PropertyAssignment),

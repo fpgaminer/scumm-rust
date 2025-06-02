@@ -31,6 +31,46 @@ fn parse_block(pair: Pair<Rule>) -> Block {
 	Block { statements }
 }
 
+fn parse_def_block(pair: Pair<Rule>) -> Result<Block, String> {
+	let mut statements = Vec::new();
+	for stmt_pair in pair.into_inner() {
+		match stmt_pair.as_rule() {
+			Rule::verb_stmt | Rule::states_assign | Rule::class_assign | Rule::prop_assign => {
+				if let Some(statement) = parse_statement(stmt_pair) {
+					statements.push(statement);
+				}
+			},
+			_ => {
+				return Err(format!(
+					"Unexpected statement '{:?}' in def_block, expected: verb_stmt, states_assign, class_assign, or prop_assign",
+					stmt_pair.as_rule()
+				));
+			},
+		}
+	}
+	Ok(Block { statements })
+}
+
+fn parse_room_block(pair: Pair<Rule>) -> Result<Block, String> {
+	let mut statements = Vec::new();
+	for stmt_pair in pair.into_inner() {
+		match stmt_pair.as_rule() {
+			Rule::prop_assign | Rule::verb_stmt | Rule::object_def | Rule::script_def => {
+				if let Some(statement) = parse_statement(stmt_pair) {
+					statements.push(statement);
+				}
+			},
+			_ => {
+				return Err(format!(
+					"Unexpected statement '{:?}' in room_block, expected: prop_assign, verb_stmt, object_def, or script_def",
+					stmt_pair.as_rule()
+				));
+			},
+		}
+	}
+	Ok(Block { statements })
+}
+
 fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 	match pair.as_rule() {
 		Rule::block => Some(Statement::Block(parse_block(pair))),
@@ -64,11 +104,6 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 				None
 			}
 		},
-		/*Rule::class_stmt => {
-			let mut inner = pair.into_inner();
-			let name = inner.next()?.as_str().to_string();
-			Some(Statement::ClassDeclaration(name))
-		},*/
 		Rule::verb_stmt => {
 			let mut inner = pair.into_inner();
 			let name = inner.next()?.as_str().to_string();
@@ -98,13 +133,13 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 		},
 		Rule::class_assign => {
 			let mut inner = pair.into_inner();
-			// Skip "class" keyword handling and extract the class name from class_array
+			// Extract all class names from class_array
 			if let Some(class_array) = inner.next() {
-				// Extract the first identifier from the class_array
-				let mut class_inner = class_array.into_inner();
-				class_inner
-					.next()
-					.map(|class_name| Statement::ClassDeclaration(class_name.as_str().to_string()))
+				let mut class_names = Vec::new();
+				for class_name_pair in class_array.into_inner() {
+					class_names.push(class_name_pair.as_str().to_string());
+				}
+				Some(Statement::ClassAssignment(class_names))
 			} else {
 				None
 			}
@@ -112,7 +147,11 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 		Rule::object_def => {
 			let mut inner = pair.into_inner();
 			let id = inner.next()?.as_str().to_string();
-			let body = inner.next().map(parse_block).unwrap_or(Block { statements: vec![] });
+			let body = match inner.next().map(parse_def_block) {
+				Some(Ok(block)) => block,
+				Some(Err(_)) => return None, // Could log error here
+				None => Block { statements: vec![] },
+			};
 			Some(Statement::ObjectDeclaration(Object { id, body }))
 		},
 		Rule::script_def => {
@@ -353,7 +392,10 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 									let mut object_inner = item_pair.into_inner();
 									let id = object_inner.next().unwrap().as_str().to_string();
 									let body = if let Some(block_pair) = object_inner.next() {
-										parse_block(block_pair)
+										match parse_def_block(block_pair) {
+											Ok(block) => block,
+											Err(err) => return Err(anyhow::anyhow!("Error parsing object def_block: {}", err)),
+										}
 									} else {
 										Block { statements: Vec::new() }
 									};
@@ -364,7 +406,10 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 									let mut class_inner = item_pair.into_inner();
 									let name = class_inner.next().unwrap().as_str().to_string();
 									let body = if let Some(block_pair) = class_inner.next() {
-										parse_block(block_pair)
+										match parse_def_block(block_pair) {
+											Ok(block) => block,
+											Err(err) => return Err(anyhow::anyhow!("Error parsing class def_block: {}", err)),
+										}
 									} else {
 										Block { statements: Vec::new() }
 									};
@@ -375,7 +420,10 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 									let mut room_inner = item_pair.into_inner();
 									let id = room_inner.next().unwrap().as_str().to_string();
 									let body = if let Some(block_pair) = room_inner.next() {
-										parse_block(block_pair)
+										match parse_room_block(block_pair) {
+											Ok(block) => block,
+											Err(err) => return Err(anyhow::anyhow!("Error parsing room room_block: {}", err)),
+										}
 									} else {
 										Block { statements: Vec::new() }
 									};
@@ -572,7 +620,7 @@ mod tests {
 				assert_eq!(obj.id, "OBJ");
 				assert_eq!(obj.body.statements.len(), 3);
 
-				matches!(obj.body.statements[0], Statement::ClassDeclaration(_));
+				matches!(obj.body.statements[0], Statement::ClassAssignment(_));
 
 				if let Statement::Verb(ref verb) = obj.body.statements[1] {
 					assert_eq!(verb.name, "vOne");
@@ -984,5 +1032,134 @@ script S() {
 		let output = preprocessor::preprocess("main.sc", &src).unwrap();
 		assert!(output.contains("script Included()"));
 		assert!(output.contains("script Main()"));
+	}
+
+	#[test]
+	fn object_class_assignment_vs_class_definition() {
+		// Test that "class = {ClassName}" in an object is parsed as a ClassAssignment
+		// not as a class definition
+		let src = r#"object TestObj {
+    class = {SomeClass};
+    verb test();
+}"#;
+		let ast = parse_ok(src);
+		assert_eq!(ast.len(), 1);
+
+		match &ast[0] {
+			TopLevel::Object(obj) => {
+				assert_eq!(obj.id, "TestObj");
+				assert_eq!(obj.body.statements.len(), 2);
+
+				// First statement should be a ClassAssignment
+				match &obj.body.statements[0] {
+					Statement::ClassAssignment(class_names) => {
+						assert_eq!(class_names.len(), 1);
+						assert_eq!(class_names[0], "SomeClass");
+					},
+					other => panic!("Expected ClassAssignment, got {:?}", other),
+				}
+
+				// Second statement should be a Verb
+				match &obj.body.statements[1] {
+					Statement::Verb(verb) => {
+						assert_eq!(verb.name, "test");
+						assert!(verb.body.is_none());
+					},
+					other => panic!("Expected Verb, got {:?}", other),
+				}
+			},
+			other => panic!("Expected Object, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn class_definition_vs_class_assignment() {
+		// Test that "class ClassName { ... }" is parsed as a Class definition (TopLevel::Class)
+		// while "class = {ClassName};" inside an object is parsed as ClassAssignment
+		let src = r#"class BaseClass {
+    verb action();
+}
+
+object TestObj {
+    class = {BaseClass};
+}"#;
+		let ast = parse_ok(src);
+		assert_eq!(ast.len(), 2);
+
+		// First should be a class definition
+		match &ast[0] {
+			TopLevel::Class(class) => {
+				assert_eq!(class.name, "BaseClass");
+				assert_eq!(class.body.statements.len(), 1);
+				match &class.body.statements[0] {
+					Statement::Verb(verb) => assert_eq!(verb.name, "action"),
+					other => panic!("Expected Verb in class, got {:?}", other),
+				}
+			},
+			other => panic!("Expected Class definition, got {:?}", other),
+		}
+
+		// Second should be an object with class assignment
+		match &ast[1] {
+			TopLevel::Object(obj) => {
+				assert_eq!(obj.id, "TestObj");
+				match &obj.body.statements[0] {
+					Statement::ClassAssignment(class_names) => {
+						assert_eq!(class_names.len(), 1);
+						assert_eq!(class_names[0], "BaseClass");
+					},
+					other => panic!("Expected ClassAssignment in object, got {:?}", other),
+				}
+			},
+			other => panic!("Expected Object, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn def_block_error_on_unexpected_statement() {
+		// Test that def_block (used by object_def and class_def) rejects unexpected statements
+		let src = r#"object TestObj {
+    if (1) { }
+}"#;
+		// This should fail because if_stmt is not allowed in def_block
+		parse_err(src);
+	}
+
+	#[test]
+	fn room_block_error_on_unexpected_statement() {
+		// Test that room_block rejects unexpected statements
+		let src = r#"room TestRoom {
+    if (1) { }
+}"#;
+		// This should fail because if_stmt is not allowed in room_block
+		parse_err(src);
+	}
+
+	#[test]
+	fn class_assignment_multiple_classes() {
+		// Test that multiple classes can be assigned to an object
+		let src = r#"object TestObj {
+    class = {ClassA, ClassB, ClassC};
+}"#;
+		let ast = parse_ok(src);
+		assert_eq!(ast.len(), 1);
+
+		match &ast[0] {
+			TopLevel::Object(obj) => {
+				assert_eq!(obj.id, "TestObj");
+				assert_eq!(obj.body.statements.len(), 1);
+
+				match &obj.body.statements[0] {
+					Statement::ClassAssignment(class_names) => {
+						assert_eq!(class_names.len(), 3);
+						assert_eq!(class_names[0], "ClassA");
+						assert_eq!(class_names[1], "ClassB");
+						assert_eq!(class_names[2], "ClassC");
+					},
+					other => panic!("Expected ClassAssignment, got {:?}", other),
+				}
+			},
+			other => panic!("Expected Object, got {:?}", other),
+		}
 	}
 }

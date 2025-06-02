@@ -303,7 +303,7 @@ fn parse_primary(pair: Pair<Rule>) -> Primary {
 			let inner_expr = pair.into_inner().next().unwrap();
 			Primary::Parenthesized(Box::new(parse_expression(inner_expr)))
 		},
-		_ => Primary::Number(0), // Fallback
+		_ => Primary::Parenthesized(Box::new(parse_expression(pair))),
 	}
 }
 

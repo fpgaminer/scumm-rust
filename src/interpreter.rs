@@ -26,7 +26,6 @@ pub enum Declaration {
 // ---------------------------------------------------------------------------
 // Runtime object definition (built from the AST once at start-up)
 // ---------------------------------------------------------------------------
-#[derive(Default)]
 pub struct ObjectDef {
 	pub name: String,                  // human readable name
 	pub classes: Vec<String>,          // List of classes this object inherits
@@ -38,6 +37,23 @@ pub struct ObjectDef {
 	pub y: i32,              // y position in pixels
 	pub width: u32,          // width in pixels
 	pub height: u32,         // height in pixels
+}
+
+impl Default for ObjectDef {
+	fn default() -> Self {
+		ObjectDef {
+			name: String::new(),
+			classes: Vec::new(),
+			verbs: HashMap::new(),
+			room: 0,
+			state: 1,
+			states: Vec::new(),
+			x: 0,
+			y: 0,
+			width: 0,
+			height: 0,
+		}
+	}
 }
 
 

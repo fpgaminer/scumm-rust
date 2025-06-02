@@ -416,9 +416,9 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 	let flattened = preprocess("main.sc", &String::from_utf8_lossy(data))?;
 	debug!("Preprocessed content length: {} chars", flattened.len());
 
-	// Phase 2: parse.
-	let pairs = match ScummParser::parse(Rule::file, &flattened) {
-		Ok(pairs) => pairs,
+	// Phase 2: parse and build AST.
+	let ast_nodes = match parse_str(&flattened) {
+		Ok(ast) => ast,
 		Err(e) => {
 			error!("Parse error: {}", e);
 			error!("Preprocessed content preview:");
@@ -429,85 +429,6 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 			return Err(anyhow::anyhow!(e));
 		},
 	};
-
-	// Phase 3: build AST
-	let mut ast_nodes = Vec::new();
-	for pair in pairs {
-		if pair.as_rule() == Rule::file {
-			for inner_pair in pair.into_inner() {
-				match inner_pair.as_rule() {
-					Rule::item => {
-						// For now, just add placeholder items
-						for item_pair in inner_pair.into_inner() {
-							match item_pair.as_rule() {
-								Rule::script_def => {
-									// Parse script definition
-									let mut script_inner = item_pair.into_inner();
-									let name_pair = script_inner.next().unwrap();
-									let name = name_pair.as_str();
-
-									// Skip the param_list for now (we don't store parameters in the AST yet)
-									let _param_list = script_inner.next().unwrap();
-
-									// Parse the script body
-									let body = if let Some(block_pair) = script_inner.next() {
-										parse_block(block_pair)
-									} else {
-										Block { statements: Vec::new() }
-									};
-
-									let script = Script { name: name.to_string(), body };
-									ast_nodes.push(TopLevel::Script(script));
-								},
-								Rule::object_def => {
-									// Parse object definition
-									let mut object_inner = item_pair.into_inner();
-									let id = object_inner.next().unwrap().as_str().to_string();
-									let body = if let Some(block_pair) = object_inner.next() {
-										parse_block(block_pair)
-									} else {
-										Block { statements: Vec::new() }
-									};
-
-									let object = Object { id, body };
-									ast_nodes.push(TopLevel::Object(object));
-								},
-								Rule::class_def => {
-									// Parse class definition
-									let mut class_inner = item_pair.into_inner();
-									let name = class_inner.next().unwrap().as_str().to_string();
-									let body = if let Some(block_pair) = class_inner.next() {
-										parse_block(block_pair)
-									} else {
-										Block { statements: Vec::new() }
-									};
-
-									let class = Class { name, body };
-									ast_nodes.push(TopLevel::Class(class));
-								},
-								Rule::room_def => {
-									// Parse room definition
-									let mut room_inner = item_pair.into_inner();
-									let id = room_inner.next().unwrap().as_str().to_string();
-									let body = if let Some(block_pair) = room_inner.next() {
-										parse_block(block_pair)
-									} else {
-										Block { statements: Vec::new() }
-									};
-
-									let room = Room { id, body };
-									ast_nodes.push(TopLevel::Room(room));
-								},
-								_ => {},
-							}
-						}
-					},
-					Rule::EOI => {},
-					_ => {},
-				}
-			}
-		}
-	}
 
 	debug!("Parsed successfully! AST nodes: {:?}", ast_nodes);
 

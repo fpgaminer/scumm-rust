@@ -1004,4 +1004,56 @@ mod tests {
 		let vars = run_script(src);
 		assert_eq!(vars.get("has"), Some(&Value::Bool(true)));
 	}
+
+	#[test]
+	fn room_with_objects_and_entry_script() {
+		let src = r#"room Kitchen {
+    image = "kitchen.png";
+    object Key { state = 0; x = 10; y = 20; }
+    object Door {
+        state = 1;
+        x = 30;
+        y = 40;
+    }
+    script entry() { setState(Key, 2); }
+}
+
+script main() {}
+"#;
+
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+
+		let decls = interp.declarations.borrow();
+
+		// Verify room exists and has an entry script
+		let room_id = decls.get_index_of("Kitchen").expect("room missing") as u32;
+		let room_def = match decls.get("Kitchen").expect("room not found") {
+			Declaration::Room(def) => def,
+			_ => panic!("Kitchen is not a room"),
+		};
+		assert!(room_def.entry_script.is_some());
+
+		// Objects should belong to the room and keep their properties
+		let key_def = match decls.get("Key").expect("Key missing") {
+			Declaration::Object(obj) => obj,
+			_ => panic!("Key is not an object"),
+		};
+		assert_eq!(key_def.room, room_id);
+		assert_eq!(key_def.state, 0);
+		assert_eq!(key_def.x, 10);
+		assert_eq!(key_def.y, 20);
+
+		let door_def = match decls.get("Door").expect("Door missing") {
+			Declaration::Object(obj) => obj,
+			_ => panic!("Door is not an object"),
+		};
+		assert_eq!(door_def.room, room_id);
+		assert_eq!(door_def.state, 1);
+		assert_eq!(door_def.x, 30);
+		assert_eq!(door_def.y, 40);
+
+		// Entry scripts are stored in the room only, not as a global script
+		assert!(decls.get("entry").is_none());
+	}
 }

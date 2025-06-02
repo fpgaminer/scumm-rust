@@ -108,6 +108,19 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 				None
 			}
 		},
+		Rule::object_def => {
+			let mut inner = pair.into_inner();
+			let id = inner.next()?.as_str().to_string();
+			let body = inner.next().map(parse_block).unwrap_or(Block { statements: vec![] });
+			Some(Statement::ObjectDeclaration(Object { id, body }))
+		},
+		Rule::script_def => {
+			let mut inner = pair.into_inner();
+			let name = inner.next()?.as_str().to_string();
+			let _params = inner.next()?; // param_list
+			let body = inner.next().map(parse_block).unwrap_or(Block { statements: vec![] });
+			Some(Statement::ScriptDeclaration(Script { name, body }))
+		},
 		Rule::states_assign => {
 			// For now, skip states_assign parsing since we don't have a complete implementation
 			// This prevents parse errors but doesn't create AST nodes for states
@@ -904,5 +917,74 @@ mod tests {
 	fn invalid_unclosed_block() {
 		let src = "script S() {";
 		parse_err(src);
+	}
+
+	#[test]
+	fn room_with_entry_and_object() {
+		let src = r#"room Kitchen {
+    image = "kitchen.png";
+    script entry() { startScript(GameLoop); }
+    object Fridge {}
+}"#;
+		let ast = parse_ok(src);
+		assert_eq!(ast.len(), 1);
+		if let TopLevel::Room(room) = &ast[0] {
+			assert_eq!(room.id, "Kitchen");
+			assert_eq!(room.body.statements.len(), 3);
+			matches!(room.body.statements[0], Statement::PropertyAssignment(_));
+			matches!(room.body.statements[1], Statement::ScriptDeclaration(_));
+			matches!(room.body.statements[2], Statement::ObjectDeclaration(_));
+		} else {
+			panic!("expected room definition");
+		}
+	}
+
+	#[test]
+	fn comments_are_ignored() {
+		let src = r#"// single line comment
+script S() {
+    /* multi-line
+       comment */
+    call();
+}
+"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			assert_eq!(script.name, "S");
+			assert_eq!(script.body.statements.len(), 1);
+			matches!(script.body.statements[0], Statement::Expression(_));
+		} else {
+			panic!("expected script");
+		}
+	}
+
+	#[test]
+	fn variable_declaration_bool_and_int() {
+		let src = r#"script S() {
+    int counter = 1;
+    bool found = false;
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Script(script) = &ast[0] {
+			assert_eq!(script.body.statements.len(), 2);
+
+			if let Statement::VariableDeclaration(var) = &script.body.statements[0] {
+				assert_eq!(var.var_type, "int");
+				assert!(matches!(var.value, Expression::Primary(Primary::Number(1))));
+			} else {
+				panic!("expected first variable declaration");
+			}
+
+			if let Statement::VariableDeclaration(var) = &script.body.statements[1] {
+				assert_eq!(var.var_type, "bool");
+				if let Expression::Primary(Primary::Identifier(id)) = &var.value {
+					assert_eq!(id, "false");
+				} else {
+					panic!("expected identifier false");
+				}
+			} else {
+				panic!("expected second variable declaration");
+			}
+		}
 	}
 }

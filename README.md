@@ -1,3 +1,10 @@
+## Compilation and Running
+
+To compile the wasm module, run `wasm-pack build`.
+To run, use `npm run dev` which starts a local server.
+
+
+
 ## TODO
 
 [ ] Lifetime handling is a mess; most every using clones, Rc, RefCell, etc. Need to go through and optimize.

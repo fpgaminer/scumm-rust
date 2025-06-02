@@ -125,7 +125,12 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let value_pair = inner.next()?;
 			let value = match value_pair.as_rule() {
 				Rule::number => PropertyValue::Number(value_pair.as_str().parse().ok()?),
-				Rule::string => PropertyValue::String(value_pair.as_str().to_string()),
+				Rule::string => {
+					let raw = value_pair.as_str();
+					// remove the leading and trailing quotes (grammar guarantees they exist)
+					let inner = &raw[1..raw.len() - 1];
+					PropertyValue::String(inner.to_string())
+				},
 				Rule::identifier => PropertyValue::Identifier(value_pair.as_str().to_string()),
 				_ => return None,
 			};

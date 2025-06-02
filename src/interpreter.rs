@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use log::{debug, error, info, warn};
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
-use web_sys::{Document, Element};
+use web_sys::{Document, Element, HtmlImageElement};
 
 
 pub enum Declaration {
@@ -134,6 +134,11 @@ struct WebInterface {
 	document: Document,
 	game_container: Element,
 	room_container: Element,
+	container_width: f64,
+	container_height: f64,
+	current_room_image: Rc<RefCell<Option<String>>>,
+	room_image_width: Rc<RefCell<f64>>,
+	room_image_height: Rc<RefCell<f64>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -142,12 +147,16 @@ impl WebInterface {
 		let window = web_sys::window().ok_or("No global `window` exists")?;
 		let document = window.document().ok_or("Should have a document on window")?;
 
+		// Define container dimensions
+		let container_width = 640.0;
+		let container_height = 480.0;
+
 		// Create main game container
 		let game_container = document.create_element("div")?;
 		game_container.set_attribute("id", "game-container")?;
 		game_container.set_attribute(
 			"style",
-			"position: relative; width: 640px; height: 480px; background: #000; margin: 0 auto; border: 2px solid #333;",
+			&format!("position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;", container_width, container_height),
 		)?;
 
 		// Create room container for objects
@@ -168,17 +177,45 @@ impl WebInterface {
 			document,
 			game_container,
 			room_container,
+			container_width,
+			container_height,
+			current_room_image: Rc::new(RefCell::new(None)),
+			room_image_width: Rc::new(RefCell::new(640.0)), // Default fallback
+			room_image_height: Rc::new(RefCell::new(480.0)), // Default fallback
 		})
 	}
 
 	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {
 		let style = if let Some(img) = image {
+			// Store the current room image path
+			*self.current_room_image.borrow_mut() = Some(img.to_string());
+			
+			// Load the image to get its natural dimensions
+			let image_element = web_sys::HtmlImageElement::new()?;
+			let room_image_width = self.room_image_width.clone();
+			let room_image_height = self.room_image_height.clone();
+			let image_element_clone = image_element.clone();
+			
+			// Create a closure to handle image load
+			let onload = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+				let width = image_element_clone.natural_width() as f64;
+				let height = image_element_clone.natural_height() as f64;
+				*room_image_width.borrow_mut() = width;
+				*room_image_height.borrow_mut() = height;
+				web_sys::console::log_1(&format!("Room image loaded: {}x{}", width, height).into());
+			}) as Box<dyn Fn()>);
+			
+			image_element.set_onload(Some(onload.as_ref().unchecked_ref()));
+			onload.forget(); // Keep the closure alive
+			image_element.set_src(img);
+			
 			format!(
-				"position: relative; width: 640px; height: 480px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
-				img
+				"position: relative; width: {}px; height: {}px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
+				self.container_width, self.container_height, img
 			)
 		} else {
-			"position: relative; width: 640px; height: 480px; background: #000; margin: 0 auto; border: 2px solid #333;".to_string()
+			*self.current_room_image.borrow_mut() = None;
+			format!("position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;", self.container_width, self.container_height)
 		};
 		self.game_container.set_attribute("style", &style)
 	}
@@ -207,9 +244,32 @@ impl WebInterface {
 			},
 		};
 
+		// Calculate scaling factor based on actual room image dimensions to container size
+		// Using "cover" scaling behavior: scale to fill container while maintaining aspect ratio
+		let room_width = *self.room_image_width.borrow();
+		let room_height = *self.room_image_height.borrow();
+		let container_ratio = self.container_width / self.container_height;
+		let room_ratio = room_width / room_height;
+		
+		let (scale_x, scale_y) = if container_ratio > room_ratio {
+			// Container is wider than room aspect ratio - scale based on height
+			let scale = self.container_height / room_height;
+			(scale, scale)
+		} else {
+			// Container is taller than room aspect ratio - scale based on width  
+			let scale = self.container_width / room_width;
+			(scale, scale)
+		};
+
+		// Apply scaling to object coordinates
+		let scaled_x = (obj.x as f64 * scale_x) as i32;
+		let scaled_y = (obj.y as f64 * scale_y) as i32;
+		let scaled_width = (obj.width as f64 * scale_x) as u32;
+		let scaled_height = (obj.height as f64 * scale_y) as u32;
+
 		let mut style = format!(
 			"position: absolute; left: {}px; top: {}px; width: {}px; height: {}px;",
-			obj.x, obj.y, obj.width, obj.height
+			scaled_x, scaled_y, scaled_width, scaled_height
 		);
 		if obj.state > 0 {
 			if let Some(img) = obj.states.get(obj.state as usize - 1) {

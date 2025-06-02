@@ -26,6 +26,7 @@ pub enum Declaration {
 // ---------------------------------------------------------------------------
 // Runtime object definition (built from the AST once at start-up)
 // ---------------------------------------------------------------------------
+#[derive(Clone)]
 pub struct ObjectDef {
 	pub name: String,                  // human readable name
 	pub classes: Vec<String>,          // List of classes this object inherits
@@ -78,13 +79,19 @@ pub struct Ctx {
 // Web interface for managing DOM
 // ---------------------------------------------------------------------------
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone)]
-struct WebInterface;
+#[derive(Clone, Default)]
+struct WebInterface {
+	room_background: Rc<RefCell<Option<String>>>,
+	objects: Rc<RefCell<HashMap<u32, ObjectDef>>>,
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WebInterface {
 	fn new() -> Result<Self, JsValue> {
-		Ok(WebInterface)
+		Ok(WebInterface {
+			room_background: Rc::new(RefCell::new(None)),
+			objects: Rc::new(RefCell::new(HashMap::new())),
+		})
 	}
 
 	#[allow(dead_code)]
@@ -92,16 +99,32 @@ impl WebInterface {
 		Ok(())
 	}
 
-	fn set_room_background(&self, _image: Option<&str>) -> Result<(), JsValue> {
+	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {
+		*self.room_background.borrow_mut() = image.map(|s| s.to_string());
 		Ok(())
 	}
 
-	fn clear_room(&self) {}
+	fn clear_room(&self) {
+		self.objects.borrow_mut().clear();
+	}
 
-	fn remove_object(&self, _id: u32) {}
+	fn remove_object(&self, id: u32) {
+		self.objects.borrow_mut().remove(&id);
+	}
 
-	fn render_object(&self, _id: u32, _obj: &ObjectDef) -> Result<(), JsValue> {
+	fn render_object(&self, id: u32, obj: &ObjectDef) -> Result<(), JsValue> {
+		self.objects.borrow_mut().insert(id, obj.clone());
 		Ok(())
+	}
+
+	#[allow(dead_code)]
+	fn get_background(&self) -> Option<String> {
+		self.room_background.borrow().clone()
+	}
+
+	#[allow(dead_code)]
+	fn get_objects(&self) -> HashMap<u32, ObjectDef> {
+		self.objects.borrow().clone()
 	}
 }
 
@@ -1258,5 +1281,49 @@ script main() { startRoom(R); }
 			_ => unreachable!(),
 		};
 		assert_eq!(obj_state, 1);
+	}
+
+	#[test]
+	fn web_interface_updates_on_object_state_change() {
+		let src = r#"room R {
+    object Key {
+        state = 1;
+        states = { { 0, 0, "key1.png" }, { 0, 0, "key2.png" } };
+    }
+    object Door { state = 1; }
+}
+
+script change() { setState(Key, 2); }
+script main() { startRoom(R); }
+"#;
+
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+
+		for _ in 0..32 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+
+		let key_id = interp.declarations.borrow().get_index_of("Key").unwrap() as u32;
+		let door_id = interp.declarations.borrow().get_index_of("Door").unwrap() as u32;
+
+		let objects = interp.web_interface.get_objects();
+		assert!(objects.contains_key(&key_id));
+		assert!(objects.contains_key(&door_id));
+		assert_eq!(objects[&key_id].state, 1);
+
+		interp.spawn_script("change");
+		for _ in 0..32 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+
+		let objects = interp.web_interface.get_objects();
+		assert_eq!(objects[&key_id].state, 2);
 	}
 }

@@ -417,9 +417,21 @@ impl Interpreter {
 	// --------------------------------------------------
 	fn spawn_script_value(&self, v: Value) {
 		match v {
-			Value::Number(n) => self.spawn_script(&n.to_string()),
+			Value::Number(n) => self.spawn_script_id(n as u32),
 			Value::Str(s) => self.spawn_script(&s),
 			_ => {},
+		}
+	}
+
+	fn spawn_script_id(&self, id: u32) {
+		if let Some((name, decl)) = self.declarations.borrow().get_index(id as usize) {
+			if matches!(decl, Declaration::Script(_)) {
+				self.spawn_script(name);
+			} else {
+				error!("Unknown script id: {}", id);
+			}
+		} else {
+			error!("Unknown script id: {}", id);
 		}
 	}
 
@@ -1281,6 +1293,13 @@ script main() { startRoom(R); }
 			_ => unreachable!(),
 		};
 		assert_eq!(obj_state, 1);
+	}
+
+	#[test]
+	fn builtin_startscript_runs_script() {
+		let src = "object O { state = 0; }\nscript S() { setState(O, 1); }\nscript main() { startScript(S); wait(1); int result = getState(O); }";
+		let vars = run_script(src);
+		assert_eq!(vars.get("result"), Some(&Value::Number(1)));
 	}
 
 	#[test]

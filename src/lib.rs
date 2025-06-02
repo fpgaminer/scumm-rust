@@ -7,6 +7,7 @@ use ast::{
 	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Room, Script, Statement, TopLevel,
 	VariableDeclaration, VerbStatement, WhileStatement,
 };
+use log::{debug, error, info};
 use pest::Parser;
 use preprocessor::preprocess;
 use wasm_bindgen::prelude::*;
@@ -395,15 +396,16 @@ pub async fn load_script_raw() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn start() {
 	set_panic_hook();
-	web_sys::console::log_1(&JsValue::from_str("Starting Scumm Script Parser..."));
+	init_logging();
+	info!("Starting Scumm Script Parser...");
 	spawn_local(async {
 		match load_script_raw().await {
 			Ok(source) => {
 				handle_script(source.as_bytes())
-					.map_err(|e| web_sys::console::error_1(&JsValue::from_str(&e.to_string())))
+					.map_err(|e| error!("Script handling error: {}", e))
 					.unwrap_or(());
 			},
-			Err(err) => web_sys::console::error_1(&err),
+			Err(err) => error!("Failed to load script: {:?}", err),
 		}
 	});
 }
@@ -412,17 +414,17 @@ pub fn start() {
 fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 	// Phase 1: preprocess includes.
 	let flattened = preprocess("main.sc", &String::from_utf8_lossy(data))?;
-	println!("Preprocessed content length: {} chars", flattened.len());
+	debug!("Preprocessed content length: {} chars", flattened.len());
 
 	// Phase 2: parse.
 	let pairs = match ScummParser::parse(Rule::file, &flattened) {
 		Ok(pairs) => pairs,
 		Err(e) => {
-			eprintln!("Parse error: {}", e);
-			eprintln!("Preprocessed content preview:");
+			error!("Parse error: {}", e);
+			error!("Preprocessed content preview:");
 			let lines: Vec<&str> = flattened.lines().collect();
 			for (i, line) in lines.iter().enumerate().take(50) {
-				eprintln!("{:3}: {}", i + 1, line);
+				error!("{:3}: {}", i + 1, line);
 			}
 			return Err(anyhow::anyhow!(e));
 		},
@@ -507,14 +509,14 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 		}
 	}
 
-	web_sys::console::log_1(&JsValue::from_str(&format!("Parsed successfully! AST nodes: {:?}", ast_nodes)));
+	debug!("Parsed successfully! AST nodes: {:?}", ast_nodes);
 
 	// Run the interpreter with web interface
 	let interpreter = interpreter::Interpreter::new(&ast_nodes);
 
 	// Initialize web interface
 	if let Err(e) = interpreter.init_web_interface() {
-		web_sys::console::error_1(&JsValue::from_str(&format!("Failed to initialize web interface: {:?}", e)));
+		error!("Failed to initialize web interface: {:?}", e);
 		return Err(anyhow::anyhow!("Web interface initialization failed"));
 	}
 
@@ -567,6 +569,18 @@ pub fn set_panic_hook() {
 	// https://github.com/rustwasm/console_error_panic_hook#readme
 	#[cfg(feature = "console_error_panic_hook")]
 	console_error_panic_hook::set_once();
+}
+
+fn init_logging() {
+	#[cfg(target_arch = "wasm32")]
+	{
+		console_log::init_with_level(log::Level::Debug).expect("Failed to initialize console_log");
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		env_logger::Builder::from_default_env().filter_level(log::LevelFilter::Debug).init();
+	}
 }
 
 
@@ -839,7 +853,7 @@ mod tests {
     a = 3 + 4 * 5;
 }"#;
 		let ast = parse_ok(src);
-		println!("AST: {:?}", ast);
+		debug!("AST: {:?}", ast);
 		if let TopLevel::Script(script) = &ast[0] {
 			if let Statement::Expression(Expression::Assignment(_, expr)) = &script.body.statements[0] {
 				if let Expression::Term(left, op, right) = &**expr {

@@ -7,11 +7,9 @@ use std::{
 };
 
 use crate::ast::*;
-#[cfg(not(target_arch = "wasm32"))]
-use futures::future::LocalBoxFuture;
-#[cfg(target_arch = "wasm32")]
 use futures::{FutureExt, future::LocalBoxFuture};
 use indexmap::IndexMap;
+use log::{debug, error, info, warn};
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Document, Element};
@@ -235,7 +233,6 @@ impl Value {
 // World model (super‑simple!)
 // ---------------------------------------------------------------------------
 #[derive(Default)]
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 struct World {
 	inventory: HashSet<u32>, // OBJ currently held by player
 	current_room: u32,
@@ -262,7 +259,6 @@ pub struct Interpreter {
 	//objects: Rc<RefCell<HashMap<i32, ObjectDef>>>, // id → def
 	//#[allow(dead_code)]
 	//object_names: Rc<HashMap<String, i32>>, // lowercase name → id
-	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 	web_interface: WebInterface, // Web DOM interface
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
 	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
@@ -284,7 +280,7 @@ impl Interpreter {
 			match tl.exec(&this) {
 				Ok(_) => {},
 				Err(err) => {
-					web_sys::console::error_1(&JsValue::from_str(&format!("Error executing top-level statement: {:?}", err)));
+					error!("Error executing top-level statement: {:?}", err);
 				},
 			}
 		}
@@ -317,7 +313,6 @@ impl Interpreter {
 	// --------------------------------------------------
 	// Script spawning helpers
 	// --------------------------------------------------
-	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 	fn spawn_script_value(&self, v: Value) {
 		match v {
 			Value::Number(n) => self.spawn_script(&n.to_string()),
@@ -334,12 +329,12 @@ impl Interpreter {
 		let script = match script {
 			Some(script) => script,
 			None => {
-				web_sys::console::error_1(&JsValue::from_str(&format!("Unknown script: {}", key)));
+				error!("Unknown script: {}", key);
 				return;
 			},
 		};
 
-		eprintln!("[info] startScript -> {}", key);
+		info!("startScript -> {}", key);
 		let ctx = Ctx {
 			vars: Rc::new(RefCell::new(HashMap::new())),
 			delay: Rc::new(RefCell::new(0)),
@@ -350,11 +345,9 @@ impl Interpreter {
 		let task = Task {
 			fut: Box::pin(async move {
 				if let Err(_err) = script.exec(&ctx).await {
-					#[cfg(target_arch = "wasm32")]
-					web_sys::console::error_1(&JsValue::from_str(&format!("Error executing script {}: {:?}", _key, _err)));
+					error!("Error executing script {}: {:?}", _key, _err);
 				} else {
-					#[cfg(target_arch = "wasm32")]
-					web_sys::console::log_1(&JsValue::from_str(&format!("Script {} executed successfully", _key)));
+					debug!("Script {} executed successfully", _key);
 				}
 			}),
 			ctx: cloned_ctx,
@@ -362,7 +355,6 @@ impl Interpreter {
 		self.run_queue.borrow_mut().push_back(task);
 	}
 
-	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 	fn to_id(&self, v: &Value) -> u32 {
 		match v {
 			Value::Number(n) => (*n).try_into().unwrap_or(0), // Convert i32 to u32, default to 0 if negative
@@ -384,9 +376,7 @@ impl Interpreter {
 			self.world.borrow_mut().current_room = 1;
 		}
 
-		web_sys::console::log_1(&JsValue::from_str(
-			format!("Ticking interpreter with {} tasks", self.run_queue.borrow().len()).as_str(),
-		));
+		debug!("Ticking interpreter with {} tasks", self.run_queue.borrow().len());
 
 		//---------------------------------------------------------------
 		// Run each runnable task *once* (co-operative multitasking)
@@ -408,7 +398,7 @@ impl Interpreter {
 			// Continue the task
 			match task.fut.as_mut().poll(&mut std::task::Context::from_waker(futures::task::noop_waker_ref())) {
 				std::task::Poll::Ready(()) => {
-					web_sys::console::log_1(&JsValue::from_str("Task completed"));
+					debug!("Task completed");
 				},
 				std::task::Poll::Pending => {
 					self.run_queue.borrow_mut().push_back(task);
@@ -417,7 +407,7 @@ impl Interpreter {
 			}
 		}
 
-		web_sys::console::log_1(&JsValue::from_str("Interpreter finished executing scripts"));
+		debug!("Interpreter finished executing scripts");
 	}
 
 	pub fn add_declaration<K: Into<String>>(&self, name: K, decl: Declaration) -> Result<u32, anyhow::Error> {
@@ -514,17 +504,17 @@ impl Interpreter {
 				continue;
 			}
 			if line == "quit" {
-				println!("Bye!");
+				info!("Bye!");
 				break;
 			}
 			if line == "inventory" {
 				if self.world.inventory.is_empty() {
-					println!("Your pockets are empty.");
+					info!("Your pockets are empty.");
 				} else {
-					println!("You are carrying:");
+					info!("You are carrying:");
 					for id in &self.world.inventory {
 						if let Some(def) = self.objects.get(id) {
-							println!(" – {}", def.name);
+							info!(" – {}", def.name);
 						}
 					}
 				}
@@ -589,7 +579,6 @@ impl Interpreter {
 // --------------------------------------------------
 // Built‑ins
 // --------------------------------------------------
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn builtin_async<F>(f: F) -> Rc<BuiltinFn>
 where
 	F: 'static + for<'a> Fn(Vec<Value>, &'a Ctx) -> LocalBoxFuture<'a, Value>,
@@ -598,7 +587,6 @@ where
 }
 
 
-#[cfg(target_arch = "wasm32")]
 fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	use Value::*;
 	let mut builtins: HashMap<String, Rc<BuiltinFn>> = HashMap::new();
@@ -607,10 +595,8 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		"print".into(),
 		builtin_async(|args, _| {
 			async move {
-				for v in args {
-					web_sys::console::log_1(&JsValue::from_str(&v.as_string()));
-				}
-				web_sys::console::log_1(&JsValue::from_str("")); // add a newline
+				let output = args.iter().map(|v| v.as_string()).collect::<Vec<_>>().join(" ");
+				info!("{}", output);
 				Null
 			}
 			.boxed_local()
@@ -634,7 +620,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		"breakScript".into(),
 		builtin_async(|_, _ctx| {
 			async move {
-				web_sys::console::log_1(&JsValue::from_str("DEBUG: Break script called!"));
+				debug!("Break script called!");
 				yield_now().await; // stop right here, resume next tick
 				Value::Null
 			}
@@ -651,7 +637,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 					let message = txt.trim_matches('"');
 
 					ctx.interpreter.web_interface.display_message(message).unwrap_or_else(|_| {
-						web_sys::console::log_1(&JsValue::from_str(message));
+						info!("{}", message);
 					});
 				}
 				Null
@@ -699,7 +685,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		builtin_async(|args, ctx| {
 			async move {
 				if args.len() != 4 {
-					web_sys::console::error_1(&JsValue::from_str("putActorAt requires exactly 4 arguments: actor, x, y, room"));
+					error!("putActorAt requires exactly 4 arguments: actor, x, y, room");
 					return Null;
 				}
 
@@ -711,7 +697,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 				// No position is tracked, so just updates the current room
 				ctx.interpreter.world.borrow_mut().current_room = room;
 
-				web_sys::console::log_1(&JsValue::from_str(&format!("[actor {actor}] appears in room {room}")));
+				info!("[actor {actor}] appears in room {room}");
 				Null
 			}
 			.boxed_local()
@@ -723,7 +709,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		builtin_async(|args, _| {
 			async move {
 				if args.len() >= 2 {
-					println!("[camera] room {} target x {}", args[0].as_string(), args[1].as_string());
+					debug!("[camera] room {} target x {}", args[0].as_string(), args[1].as_string());
 				}
 				Null
 			}
@@ -735,7 +721,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		builtin_async(|args, _| {
 			async move {
 				if args.len() >= 3 {
-					println!("[actor {}] walks to {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
+					debug!("[actor {}] walks to {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
 				}
 				Null
 			}
@@ -747,7 +733,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		builtin_async(|args, _| {
 			async move {
 				if args.len() >= 2 {
-					println!("[actor {}] faces dir {}", args[0].as_string(), args[1].as_string());
+					debug!("[actor {}] faces dir {}", args[0].as_string(), args[1].as_string());
 				}
 				Null
 			}
@@ -760,7 +746,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		builtin_async(|args, ctx| {
 			async move {
 				if args.len() != 1 {
-					web_sys::console::error_1(&JsValue::from_str("getState requires exactly 1 argument: object"));
+					error!("getState requires exactly 1 argument: object");
 					return Null;
 				}
 
@@ -769,7 +755,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 				if let Some(state) = ctx.interpreter.with_object_by_id(id, |object| object.state) {
 					Value::Number(state as i32)
 				} else {
-					web_sys::console::warn_1(&JsValue::from_str(&format!("[object {id}] not found")));
+					warn!("[object {id}] not found");
 					Null
 				}
 			}
@@ -782,7 +768,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		builtin_async(|args, ctx| {
 			async move {
 				if args.len() != 2 {
-					web_sys::console::error_1(&JsValue::from_str("setState requires exactly 2 arguments: object, state"));
+					error!("setState requires exactly 2 arguments: object, state");
 					return Null;
 				}
 
@@ -791,11 +777,11 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 
 				match ctx.interpreter.with_object_by_id_mut(id, |object| {
 					object.state = state_value;
-					web_sys::console::log_1(&JsValue::from_str(&format!("[object {id}] state set to {state_value}")));
+					debug!("[object {id}] state set to {state_value}");
 				}) {
 					Some(_) => {},
 					None => {
-						web_sys::console::warn_1(&JsValue::from_str(&format!("[object {id}] not found")));
+						warn!("[object {id}] not found");
 					},
 				}
 
@@ -828,8 +814,8 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 					let id = ctx.interpreter.to_id(obj);
 					ctx.interpreter.world.borrow_mut().inventory.insert(id);
 
-					// Log to web console and potentially update inventory display
-					web_sys::console::log_1(&JsValue::from_str(&format!("[inventory] added object {id}")));
+					// Log and potentially update inventory display
+					debug!("[inventory] added object {id}");
 
 					// Future enhancement: update visual inventory display
 				}
@@ -843,7 +829,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		"pickupObject".into(),
 		builtin_async(|_args, _ctx| {
 			async move {
-				web_sys::console::log_1(&JsValue::from_str("pickupObject called – this is a stub!"));
+				debug!("pickupObject called – this is a stub!");
 				Null
 			}
 			.boxed_local()
@@ -859,10 +845,10 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 					let anim_id = args[1].as_number();
 
 					// Log animation and potentially trigger visual effect
-					web_sys::console::log_1(&JsValue::from_str(&format!("[object {obj_id}] plays anim {anim_id}")));
+					debug!("[object {obj_id}] plays anim {anim_id}");
 
 					// Future enhancement: add CSS animation or transform to the object div
-					if let Some(obj_div) = ctx.interpreter.web_interface.document.get_element_by_id(&format!("object-{}", obj_id)) {
+					/*if let Some(obj_div) = ctx.interpreter.web_interface.document.get_element_by_id(&format!("object-{}", obj_id)) {
 						// Simple bounce animation for now
 						obj_div
 							.set_attribute(
@@ -870,9 +856,9 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 								&format!("{}; animation: bounce 0.5s ease-in-out;", obj_div.get_attribute("style").unwrap_or_default()),
 							)
 							.unwrap_or_else(|e| {
-								web_sys::console::error_1(&JsValue::from_str(&format!("Error animating object: {:?}", e)));
+								error!("Error animating object: {:?}", e);
 							});
-					}
+					}*/
 				}
 				Null
 			}
@@ -886,7 +872,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 			async move {
 				if let Some(room) = args.first() {
 					let id = ctx.interpreter.to_id(room);
-					println!("[game] loading room {id} – thanks for playing!");
+					info!("[game] loading room {id} – thanks for playing!");
 					ctx.interpreter.run_queue.borrow_mut().clear(); // stop
 				}
 				Null
@@ -896,11 +882,6 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	);
 
 	builtins
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
-	HashMap::new()
 }
 
 
@@ -922,8 +903,6 @@ impl Future for YieldNow {
 	}
 }
 
-
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn yield_now() -> YieldNow {
 	YieldNow(false)
 }

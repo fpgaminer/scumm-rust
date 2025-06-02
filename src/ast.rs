@@ -71,6 +71,9 @@ impl Object {
 						anyhow::bail!("Property '{}' must be a number", prop.name);
 					}
 				},
+				Statement::States(entries) => {
+					obj.states = entries.iter().map(|e| e.image.clone()).collect();
+				},
 				Statement::PropertyAssignment(prop) => {
 					anyhow::bail!("Unsupported property assignment in object definition: {:?}", prop);
 				},
@@ -188,6 +191,7 @@ pub enum Statement {
 	Verb(VerbStatement),
 	VariableDeclaration(VariableDeclaration),
 	PropertyAssignment(PropertyAssignment),
+	States(Vec<StateEntry>),
 	State(StateStatement),
 	ObjectDeclaration(Object),
 	ScriptDeclaration(Script),
@@ -268,6 +272,13 @@ pub enum PropertyValue {
 pub struct StateStatement {
 	pub number: u32,
 	pub assignments: Vec<(String, Primary)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateEntry {
+	pub x: i32,
+	pub y: i32,
+	pub image: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

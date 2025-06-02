@@ -522,6 +522,7 @@ fn init_logging() {
 mod tests {
 	use super::*;
 	use crate::ast::{EqualityOp, FactorOp, PropertyValue, TermOp};
+	use std::fs;
 
 	fn parse_ok(src: &str) -> Vec<TopLevel> {
 		parse_str(src).expect("parse failed")
@@ -934,5 +935,54 @@ script S() {
 				panic!("expected second variable declaration");
 			}
 		}
+	}
+
+	#[test]
+	fn object_states_array_parse() {
+		let src = r#"object OBJ {
+    states = {
+        { 1, 2, "one.png" },
+        { 3, 4, "two.png" },
+    };
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Object(obj) = &ast[0] {
+			assert_eq!(obj.body.statements.len(), 1);
+			if let Statement::States(entries) = &obj.body.statements[0] {
+				assert_eq!(entries.len(), 2);
+				assert_eq!(entries[0].x, 1);
+				assert_eq!(entries[0].y, 2);
+				assert_eq!(entries[0].image, "one.png");
+				assert_eq!(entries[1].x, 3);
+				assert_eq!(entries[1].y, 4);
+				assert_eq!(entries[1].image, "two.png");
+			} else {
+				panic!("expected states statement");
+			}
+		} else {
+			panic!("expected object");
+		}
+	}
+
+	#[test]
+	fn interpreter_object_states() {
+		let src = r#"object OBJ {
+    states = { { 0, 0, "a.png" }, { 0, 0, "b.png" } };
+}"#;
+		let ast = parse_ok(src);
+		let interp = interpreter::Interpreter::new(&ast);
+		let states = interp.with_object_by_name("OBJ", |o| o.states.clone()).expect("object missing");
+		assert_eq!(states, vec!["a.png".to_string(), "b.png".to_string()]);
+	}
+
+	#[test]
+	fn preprocess_includes_file() {
+		let dir = std::env::temp_dir();
+		let inc_path = dir.join("inc.sc");
+		fs::write(&inc_path, "script Included() {}\n").unwrap();
+		let src = format!("#include \"{}\"\nscript Main() {{}}\n", inc_path.display());
+		let output = preprocessor::preprocess("main.sc", &src).unwrap();
+		assert!(output.contains("script Included()"));
+		assert!(output.contains("script Main()"));
 	}
 }

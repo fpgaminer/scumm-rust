@@ -83,14 +83,26 @@ struct WebInterface;
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WebInterface {
-	fn new() -> Result<Self, JsValue> {
-		Ok(WebInterface)
-	}
+        fn new() -> Result<Self, JsValue> {
+                Ok(WebInterface)
+        }
 
-	#[allow(dead_code)]
-	fn display_message(&self, _message: &str) -> Result<(), JsValue> {
-		Ok(())
-	}
+        #[allow(dead_code)]
+        fn display_message(&self, _message: &str) -> Result<(), JsValue> {
+                Ok(())
+        }
+
+        fn set_room_background(&self, _image: Option<&str>) -> Result<(), JsValue> {
+                Ok(())
+        }
+
+        fn clear_room(&self) {}
+
+        fn remove_object(&self, _id: u32) {}
+
+        fn render_object(&self, _id: u32, _obj: &ObjectDef) -> Result<(), JsValue> {
+                Ok(())
+        }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -98,7 +110,7 @@ impl WebInterface {
 struct WebInterface {
 	document: Document,
 	game_container: Element,
-	//room_container: Element,
+	room_container: Element,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -112,7 +124,7 @@ impl WebInterface {
 		game_container.set_attribute("id", "game-container")?;
 		game_container.set_attribute(
 			"style",
-			"position: relative; width: 640px; height: 480px; background: #000 url('room1.png') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
+			"position: relative; width: 640px; height: 480px; background: #000; margin: 0 auto; border: 2px solid #333;",
 		)?;
 
 		// Create room container for objects
@@ -132,8 +144,57 @@ impl WebInterface {
 		Ok(WebInterface {
 			document,
 			game_container,
-			//room_container,
+			room_container,
 		})
+	}
+
+	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {
+		let style = if let Some(img) = image {
+			format!(
+				"position: relative; width: 640px; height: 480px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
+				img
+			)
+		} else {
+			"position: relative; width: 640px; height: 480px; background: #000; margin: 0 auto; border: 2px solid #333;".to_string()
+		};
+		self.game_container.set_attribute("style", &style)
+	}
+
+	fn clear_room(&self) {
+		while let Some(child) = self.room_container.first_child() {
+			let _ = self.room_container.remove_child(&child);
+		}
+	}
+
+	fn remove_object(&self, id: u32) {
+		if let Some(el) = self.document.get_element_by_id(&format!("object-{}", id)) {
+			let _ = el.remove();
+		}
+	}
+
+	fn render_object(&self, id: u32, obj: &ObjectDef) -> Result<(), JsValue> {
+		let element = match self.document.get_element_by_id(&format!("object-{}", id)) {
+			Some(el) => el,
+			None => {
+				let div = self.document.create_element("div")?;
+				div.set_attribute("id", &format!("object-{}", id))?;
+				div.set_attribute("class", "game-object")?;
+				self.room_container.append_child(&div)?;
+				div
+			},
+		};
+
+		let mut style = format!(
+			"position: absolute; left: {}px; top: {}px; width: {}px; height: {}px;",
+			obj.x, obj.y, obj.width, obj.height
+		);
+		if obj.state > 0 {
+			if let Some(img) = obj.states.get(obj.state as usize - 1) {
+				style.push_str(&format!(" background: url('{}') no-repeat; background-size: contain;", img));
+			}
+		}
+		element.set_attribute("style", &style)?;
+		Ok(())
 	}
 
 	//fn create_object_div(&self, object_def: &ObjectDef, _room_id: i32) -> Result<Element, JsValue> {
@@ -278,6 +339,7 @@ pub struct Interpreter {
 	web_interface: WebInterface, // Web DOM interface
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
 	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
+	last_room: RefCell<u32>,
 }
 
 impl Interpreter {
@@ -289,6 +351,7 @@ impl Interpreter {
 			web_interface: WebInterface::new().unwrap(),
 			run_queue: Rc::new(RefCell::new(VecDeque::new())),
 			declarations: Rc::new(RefCell::new(IndexMap::new())),
+			last_room: RefCell::new(0),
 		};
 
 		// Execute the AST to build up all the declarations
@@ -424,6 +487,11 @@ impl Interpreter {
 		}
 
 		debug!("Interpreter finished executing scripts");
+
+		// Update DOM after script execution
+		if let Err(e) = self.sync_web() {
+			error!("Web sync error: {:?}", e);
+		}
 	}
 
 	pub fn add_declaration<K: Into<String>>(&self, name: K, decl: Declaration) -> Result<u32, anyhow::Error> {
@@ -469,6 +537,56 @@ impl Interpreter {
 			Declaration::Object(obj) => Some(f(obj)),
 			_ => None,
 		})
+	}
+
+	pub fn with_room_by_id<F, R>(&self, id: u32, f: F) -> Option<R>
+	where
+		F: FnOnce(&RoomDef) -> R,
+	{
+		self.declarations.borrow().get_index(id as usize).and_then(|(_, decl)| match decl {
+			Declaration::Room(room) => Some(f(room)),
+			_ => None,
+		})
+	}
+
+	fn sync_web(&self) -> Result<(), JsValue> {
+		let room_id = self.world.borrow().current_room;
+		if room_id != *self.last_room.borrow() {
+			self.render_room(room_id)?;
+			*self.last_room.borrow_mut() = room_id;
+		} else {
+			self.update_objects(room_id)?;
+		}
+		Ok(())
+	}
+
+	fn render_room(&self, room_id: u32) -> Result<(), JsValue> {
+		self.web_interface.clear_room();
+
+		let image = self.with_room_by_id(room_id, |r| r.image.clone()).flatten();
+		self.web_interface.set_room_background(image.as_deref())?;
+
+                for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
+                        if let Declaration::Object(obj) = decl {
+                                if obj.room == room_id && obj.state > 0 {
+                                        self.web_interface.render_object(i as u32, obj)?;
+                                }
+                        }
+                }
+		Ok(())
+	}
+
+	fn update_objects(&self, room_id: u32) -> Result<(), JsValue> {
+                for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
+                        if let Declaration::Object(obj) = decl {
+                                if obj.room != room_id || obj.state == 0 {
+                                        self.web_interface.remove_object(i as u32);
+                                } else {
+                                        self.web_interface.render_object(i as u32, obj)?;
+                                }
+			}
+		}
+		Ok(())
 	}
 
 	// --------------------------------------------------

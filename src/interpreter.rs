@@ -7,9 +7,13 @@ use std::{
 };
 
 use crate::ast::*;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::future::LocalBoxFuture;
+#[cfg(target_arch = "wasm32")]
 use futures::{FutureExt, future::LocalBoxFuture};
 use indexmap::IndexMap;
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use web_sys::{Document, Element};
 
 
@@ -59,6 +63,23 @@ pub struct Ctx {
 // ---------------------------------------------------------------------------
 // Web interface for managing DOM
 // ---------------------------------------------------------------------------
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+struct WebInterface;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WebInterface {
+	fn new() -> Result<Self, JsValue> {
+		Ok(WebInterface)
+	}
+
+	#[allow(dead_code)]
+	fn display_message(&self, _message: &str) -> Result<(), JsValue> {
+		Ok(())
+	}
+}
+
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 struct WebInterface {
 	document: Document,
@@ -66,6 +87,7 @@ struct WebInterface {
 	//room_container: Element,
 }
 
+#[cfg(target_arch = "wasm32")]
 impl WebInterface {
 	fn new() -> Result<Self, JsValue> {
 		let window = web_sys::window().ok_or("No global `window` exists")?;
@@ -213,6 +235,7 @@ impl Value {
 // World model (super‑simple!)
 // ---------------------------------------------------------------------------
 #[derive(Default)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 struct World {
 	inventory: HashSet<u32>, // OBJ currently held by player
 	current_room: u32,
@@ -239,6 +262,7 @@ pub struct Interpreter {
 	//objects: Rc<RefCell<HashMap<i32, ObjectDef>>>, // id → def
 	//#[allow(dead_code)]
 	//object_names: Rc<HashMap<String, i32>>, // lowercase name → id
+	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 	web_interface: WebInterface, // Web DOM interface
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
 	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
@@ -293,6 +317,7 @@ impl Interpreter {
 	// --------------------------------------------------
 	// Script spawning helpers
 	// --------------------------------------------------
+	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 	fn spawn_script_value(&self, v: Value) {
 		match v {
 			Value::Number(n) => self.spawn_script(&n.to_string()),
@@ -320,14 +345,16 @@ impl Interpreter {
 			delay: Rc::new(RefCell::new(0)),
 			interpreter: self.clone(),
 		};
-		let key = key.to_string();
+		let _key = key.to_string();
 		let cloned_ctx = ctx.clone();
 		let task = Task {
 			fut: Box::pin(async move {
-				if let Err(err) = script.exec(&ctx).await {
-					web_sys::console::error_1(&JsValue::from_str(&format!("Error executing script {}: {:?}", key, err)));
+				if let Err(_err) = script.exec(&ctx).await {
+					#[cfg(target_arch = "wasm32")]
+					web_sys::console::error_1(&JsValue::from_str(&format!("Error executing script {}: {:?}", _key, _err)));
 				} else {
-					web_sys::console::log_1(&JsValue::from_str(&format!("Script {} executed successfully", key)));
+					#[cfg(target_arch = "wasm32")]
+					web_sys::console::log_1(&JsValue::from_str(&format!("Script {} executed successfully", _key)));
 				}
 			}),
 			ctx: cloned_ctx,
@@ -335,6 +362,7 @@ impl Interpreter {
 		self.run_queue.borrow_mut().push_back(task);
 	}
 
+	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 	fn to_id(&self, v: &Value) -> u32 {
 		match v {
 			Value::Number(n) => (*n).try_into().unwrap_or(0), // Convert i32 to u32, default to 0 if negative
@@ -561,6 +589,7 @@ impl Interpreter {
 // --------------------------------------------------
 // Built‑ins
 // --------------------------------------------------
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn builtin_async<F>(f: F) -> Rc<BuiltinFn>
 where
 	F: 'static + for<'a> Fn(Vec<Value>, &'a Ctx) -> LocalBoxFuture<'a, Value>,
@@ -569,6 +598,7 @@ where
 }
 
 
+#[cfg(target_arch = "wasm32")]
 fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	use Value::*;
 	let mut builtins: HashMap<String, Rc<BuiltinFn>> = HashMap::new();
@@ -868,6 +898,11 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	builtins
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
+	HashMap::new()
+}
+
 
 #[derive(Debug)]
 #[must_use = "must await or poll this future"]
@@ -888,6 +923,7 @@ impl Future for YieldNow {
 }
 
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn yield_now() -> YieldNow {
 	YieldNow(false)
 }
@@ -921,5 +957,59 @@ fn read_player_command() -> Option<String> {
 		Some(buf.trim().to_lowercase())
 	} else {
 		None
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::collections::HashMap;
+
+	fn run_script(src: &str) -> HashMap<String, Value> {
+		let ast = crate::parse_str(src).expect("parse failed");
+
+		// Use the real constructor so that interpreter state is initialised
+		let interp = Interpreter::new(&ast);
+
+		// Grab the context of the spawned `main` script so we can inspect its vars
+		let ctx = interp.run_queue.borrow().front().expect("no script spawned").ctx.clone();
+
+		// Tick until all tasks have completed. This replicates the
+		// interpreter loop without relying on web-specific APIs.
+		use futures::task::{Context, Poll, noop_waker_ref};
+
+		while !interp.run_queue.borrow().is_empty() {
+			let mut n = interp.run_queue.borrow().len();
+			while n > 0 {
+				let mut task = interp.run_queue.borrow_mut().pop_front().unwrap();
+				n -= 1;
+
+				if *task.ctx.delay.borrow() > 0 {
+					*task.ctx.delay.borrow_mut() -= 1;
+					interp.run_queue.borrow_mut().push_back(task);
+					continue;
+				}
+
+				match task.fut.as_mut().poll(&mut Context::from_waker(noop_waker_ref())) {
+					Poll::Ready(()) => {},
+					Poll::Pending => interp.run_queue.borrow_mut().push_back(task),
+				}
+			}
+		}
+
+		ctx.vars.borrow().clone()
+	}
+
+	#[test]
+	fn math_precedence() {
+		let vars = run_script("script main() {\n    int a = 3 + 4 * 5;\n    int b = (3 + 4) * 5;\n}");
+		assert_eq!(vars.get("a"), Some(&Value::Number(23)));
+		assert_eq!(vars.get("b"), Some(&Value::Number(35)));
+	}
+
+	#[test]
+	fn variable_reassignment() {
+		let vars = run_script("script main() {\n    int x = 1;\n    x = x + 4 * 2;\n}");
+		assert_eq!(vars.get("x"), Some(&Value::Number(9)));
 	}
 }

@@ -1,4 +1,4 @@
-use crate::interpreter::{Ctx, Value};
+use crate::interpreter::{Ctx, Declaration, Interpreter, ObjectDef, RoomDef, Value};
 use async_recursion::async_recursion;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -6,20 +6,87 @@ pub enum TopLevel {
 	Script(Script),
 	Object(Object),
 	Class(Class),
-	Directive(String, String), // directive name and value
+	Room(Room),
+}
+
+impl TopLevel {
+	pub fn exec(&self, interp: &Interpreter) -> Result<u32, anyhow::Error> {
+		match self {
+			TopLevel::Script(script) => script.exec(interp),
+			TopLevel::Object(obj) => obj.exec(interp),
+			TopLevel::Class(class) => class.exec(interp),
+			TopLevel::Room(room) => room.exec(interp),
+		}
+	}
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Script {
-	pub name: ScriptName,
+	pub name: String,
 	pub body: Block,
+}
+
+impl Script {
+	pub fn exec(&self, interp: &Interpreter) -> Result<u32, anyhow::Error> {
+		interp.add_declaration(&self.name, Declaration::Script(self.body.clone()))
+	}
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Object {
 	pub id: String,
-	pub name: String,
 	pub body: Block,
+}
+
+impl Object {
+	pub fn exec(&self, interp: &Interpreter) -> Result<u32, anyhow::Error> {
+		let mut obj = ObjectDef::default();
+
+		for stmt in &self.body.statements {
+			match stmt {
+				Statement::PropertyAssignment(prop) if prop.name == "name" => {
+					if let PropertyValue::String(name) = &prop.value {
+						obj.name = name.clone();
+					} else {
+						anyhow::bail!("Property 'name' must be a string");
+					}
+				},
+				Statement::PropertyAssignment(prop) if prop.name == "state" => {
+					if let PropertyValue::Number(state) = &prop.value {
+						obj.state = (*state).try_into().map_err(|_| anyhow::anyhow!("State must be >= 0"))?;
+					} else {
+						anyhow::bail!("Property 'state' must be a number");
+					}
+				},
+				Statement::PropertyAssignment(prop) if prop.name == "x" || prop.name == "y" || prop.name == "w" || prop.name == "h" => {
+					if let PropertyValue::Number(v) = &prop.value {
+						match prop.name.as_str() {
+							"x" => obj.x = *v,
+							"y" => obj.y = *v,
+							"w" => obj.width = (*v).try_into().map_err(|_| anyhow::anyhow!("Width must be >= 0"))?,
+							"h" => obj.height = (*v).try_into().map_err(|_| anyhow::anyhow!("Height must be >= 0"))?,
+							_ => unreachable!(), // Handled above
+						}
+					} else {
+						anyhow::bail!("Property '{}' must be a number", prop.name);
+					}
+				},
+				Statement::PropertyAssignment(prop) => {
+					anyhow::bail!("Unsupported property assignment in object definition: {:?}", prop);
+				},
+				Statement::Verb(verb_stmt) => {
+					if let Some(body) = &verb_stmt.body {
+						obj.verbs.insert(verb_stmt.name.clone(), body.clone());
+					} else {
+						obj.verbs.insert(verb_stmt.name.clone(), Block { statements: vec![] });
+					}
+				},
+				_ => anyhow::bail!("Unsupported statement in object definition: {:?}", stmt),
+			}
+		}
+
+		interp.add_declaration(&self.id, Declaration::Object(obj))
+	}
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,11 +95,73 @@ pub struct Class {
 	pub body: Block,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ScriptName {
-	Number(u32),
-	Identifier(String),
+impl Class {
+	pub fn exec(&self, interp: &Interpreter) -> Result<u32, anyhow::Error> {
+		let mut class_def = ObjectDef {
+			name: self.name.clone(),
+			..Default::default()
+		};
+
+		for stmt in &self.body.statements {
+			match stmt {
+				Statement::Verb(verb_stmt) => {
+					if let Some(body) = &verb_stmt.body {
+						class_def.verbs.insert(verb_stmt.name.clone(), body.clone());
+					} else {
+						class_def.verbs.insert(verb_stmt.name.clone(), Block { statements: vec![] });
+					}
+				},
+				_ => anyhow::bail!("Unsupported statement in class definition: {:?}", stmt),
+			}
+		}
+
+		interp.add_declaration(&self.name, Declaration::Class(class_def))
+	}
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Room {
+	pub id: String,
+	pub body: Block,
+}
+
+impl Room {
+	pub fn exec(&self, interp: &Interpreter) -> Result<u32, anyhow::Error> {
+		let mut room_def = RoomDef::default();
+		let mut objects = Vec::new();
+		room_def.name = self.id.clone();
+
+		for stmt in &self.body.statements {
+			match stmt {
+				Statement::PropertyAssignment(prop) if prop.name == "image" => {
+					if let PropertyValue::String(image) = &prop.value {
+						room_def.image = Some(image.clone());
+					} else {
+						anyhow::bail!("Property 'image' must be a string");
+					}
+				},
+				Statement::ObjectDeclaration(obj_stmt) => {
+					objects.push(obj_stmt.exec(interp)?);
+				},
+				Statement::ScriptDeclaration(script) if script.name == "entry" => {
+					// Special handling for entry script
+					room_def.entry_script = Some(script.body.clone());
+				},
+				_ => anyhow::bail!("Unsupported statement in room definition: {:?}", stmt),
+			}
+		}
+
+		let room_id = interp.add_declaration(&self.id, Declaration::Room(room_def))?;
+		for obj_id in objects {
+			interp.with_object_by_id_mut(obj_id, |obj| {
+				obj.room = room_id;
+			});
+		}
+
+		Ok(room_id)
+	}
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
@@ -60,6 +189,8 @@ pub enum Statement {
 	VariableDeclaration(VariableDeclaration),
 	PropertyAssignment(PropertyAssignment),
 	State(StateStatement),
+	ObjectDeclaration(Object),
+	ScriptDeclaration(Script),
 }
 
 impl Statement {
@@ -128,7 +259,7 @@ pub struct PropertyAssignment {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropertyValue {
-	Number(u32),
+	Number(i32),
 	String(String),
 	Identifier(String),
 }
@@ -265,8 +396,8 @@ impl Primary {
 			Primary::Identifier(id) => {
 				if let Some(v) = ctx.vars.borrow().get(id) {
 					Ok(v.clone())
-				} else if let Some(c) = ctx.interpreter.consts.get(id) {
-					Ok(c.clone())
+				} else if let Some(c) = ctx.interpreter.declarations.borrow().get_index_of(id) {
+					Ok(Value::Number(c as i32))
 				} else {
 					// Treat unknown identifier as its literal name (useful for script symbols)
 					Ok(Value::Str(id.clone()))

@@ -4,8 +4,8 @@ mod preprocessor;
 
 use anyhow::Result;
 use ast::{
-	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Script, ScriptName, StateStatement, Statement,
-	TopLevel, VariableDeclaration, VerbStatement, WhileStatement,
+	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Room, Script, Statement, TopLevel,
+	VariableDeclaration, VerbStatement, WhileStatement,
 };
 use pest::Parser;
 use preprocessor::preprocess;
@@ -63,14 +63,16 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 				None
 			}
 		},
-		Rule::class_stmt => {
+		/*Rule::class_stmt => {
 			let mut inner = pair.into_inner();
 			let name = inner.next()?.as_str().to_string();
 			Some(Statement::ClassDeclaration(name))
-		},
+		},*/
 		Rule::verb_stmt => {
 			let mut inner = pair.into_inner();
 			let name = inner.next()?.as_str().to_string();
+			// Skip the param_list for now (we don't store parameters in the AST yet)
+			let _param_list = inner.next()?;
 			let body = inner.next().map(parse_block);
 			Some(Statement::Verb(VerbStatement { name, body }))
 		},
@@ -93,20 +95,23 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			};
 			Some(Statement::PropertyAssignment(PropertyAssignment { name, value }))
 		},
-		Rule::state_stmt => {
+		Rule::class_assign => {
 			let mut inner = pair.into_inner();
-			let number = inner.next()?.as_str().parse().ok()?;
-			let mut assignments = Vec::new();
-			while let Some(pair) = inner.next() {
-				if pair.as_rule() == Rule::identifier {
-					let key = pair.as_str().to_string();
-					if let Some(value_pair) = inner.next() {
-						let value = parse_primary(value_pair);
-						assignments.push((key, value));
-					}
-				}
+			// Skip "class" keyword handling and extract the class name from class_array
+			if let Some(class_array) = inner.next() {
+				// Extract the first identifier from the class_array
+				let mut class_inner = class_array.into_inner();
+				class_inner
+					.next()
+					.map(|class_name| Statement::ClassDeclaration(class_name.as_str().to_string()))
+			} else {
+				None
 			}
-			Some(Statement::State(StateStatement { number, assignments }))
+		},
+		Rule::states_assign => {
+			// For now, skip states_assign parsing since we don't have a complete implementation
+			// This prevents parse errors but doesn't create AST nodes for states
+			None
 		},
 		_ => None,
 	}
@@ -289,6 +294,7 @@ fn parse_primary(pair: Pair<Rule>) -> Primary {
 	}
 }
 
+
 pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 	let pairs = ScummParser::parse(Rule::file, input)?;
 	let mut ast_nodes = Vec::new();
@@ -297,22 +303,16 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 		if pair.as_rule() == Rule::file {
 			for inner_pair in pair.into_inner() {
 				match inner_pair.as_rule() {
-					Rule::directive => {
-						let mut inner = inner_pair.into_inner();
-						let name = inner.next().unwrap().as_str().to_string();
-						let value = inner.next().map(|p| p.as_str().trim().to_string()).unwrap_or_default();
-						ast_nodes.push(TopLevel::Directive(name, value));
-					},
 					Rule::item => {
 						for item_pair in inner_pair.into_inner() {
 							match item_pair.as_rule() {
 								Rule::script_def => {
 									let mut script_inner = item_pair.into_inner();
 									let name_pair = script_inner.next().unwrap();
-									let name = match name_pair.as_str().parse::<u32>() {
-										Ok(num) => ScriptName::Number(num),
-										Err(_) => ScriptName::Identifier(name_pair.as_str().to_string()),
-									};
+									let name = name_pair.as_str();
+
+									// Skip the param_list for now (we don't store parameters in the AST yet)
+									let _param_list = script_inner.next().unwrap();
 
 									let body = if let Some(block_pair) = script_inner.next() {
 										parse_block(block_pair)
@@ -320,19 +320,18 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 										Block { statements: Vec::new() }
 									};
 
-									ast_nodes.push(TopLevel::Script(Script { name, body }));
+									ast_nodes.push(TopLevel::Script(Script { name: name.to_string(), body }));
 								},
 								Rule::object_def => {
 									let mut object_inner = item_pair.into_inner();
 									let id = object_inner.next().unwrap().as_str().to_string();
-									let name = object_inner.next().unwrap().as_str().to_string();
 									let body = if let Some(block_pair) = object_inner.next() {
 										parse_block(block_pair)
 									} else {
 										Block { statements: Vec::new() }
 									};
 
-									ast_nodes.push(TopLevel::Object(Object { id, name, body }));
+									ast_nodes.push(TopLevel::Object(Object { id, body }));
 								},
 								Rule::class_def => {
 									let mut class_inner = item_pair.into_inner();
@@ -344,6 +343,17 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 									};
 
 									ast_nodes.push(TopLevel::Class(Class { name, body }));
+								},
+								Rule::room_def => {
+									let mut room_inner = item_pair.into_inner();
+									let id = room_inner.next().unwrap().as_str().to_string();
+									let body = if let Some(block_pair) = room_inner.next() {
+										parse_block(block_pair)
+									} else {
+										Block { statements: Vec::new() }
+									};
+
+									ast_nodes.push(TopLevel::Room(Room { id, body }));
 								},
 								_ => {},
 							}
@@ -411,12 +421,6 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 		if pair.as_rule() == Rule::file {
 			for inner_pair in pair.into_inner() {
 				match inner_pair.as_rule() {
-					Rule::directive => {
-						let mut inner = inner_pair.into_inner();
-						let name = inner.next().unwrap().as_str().to_string();
-						let value = inner.next().map(|p| p.as_str().trim().to_string()).unwrap_or_default();
-						ast_nodes.push(TopLevel::Directive(name, value));
-					},
 					Rule::item => {
 						// For now, just add placeholder items
 						for item_pair in inner_pair.into_inner() {
@@ -425,10 +429,10 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 									// Parse script definition
 									let mut script_inner = item_pair.into_inner();
 									let name_pair = script_inner.next().unwrap();
-									let name = match name_pair.as_str().parse::<u32>() {
-										Ok(num) => ScriptName::Number(num),
-										Err(_) => ScriptName::Identifier(name_pair.as_str().to_string()),
-									};
+									let name = name_pair.as_str();
+
+									// Skip the param_list for now (we don't store parameters in the AST yet)
+									let _param_list = script_inner.next().unwrap();
 
 									// Parse the script body
 									let body = if let Some(block_pair) = script_inner.next() {
@@ -437,21 +441,20 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 										Block { statements: Vec::new() }
 									};
 
-									let script = Script { name, body };
+									let script = Script { name: name.to_string(), body };
 									ast_nodes.push(TopLevel::Script(script));
 								},
 								Rule::object_def => {
 									// Parse object definition
 									let mut object_inner = item_pair.into_inner();
 									let id = object_inner.next().unwrap().as_str().to_string();
-									let name = object_inner.next().unwrap().as_str().to_string();
 									let body = if let Some(block_pair) = object_inner.next() {
 										parse_block(block_pair)
 									} else {
 										Block { statements: Vec::new() }
 									};
 
-									let object = Object { id, name, body };
+									let object = Object { id, body };
 									ast_nodes.push(TopLevel::Object(object));
 								},
 								Rule::class_def => {
@@ -466,6 +469,19 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 
 									let class = Class { name, body };
 									ast_nodes.push(TopLevel::Class(class));
+								},
+								Rule::room_def => {
+									// Parse room definition
+									let mut room_inner = item_pair.into_inner();
+									let id = room_inner.next().unwrap().as_str().to_string();
+									let body = if let Some(block_pair) = room_inner.next() {
+										parse_block(block_pair)
+									} else {
+										Block { statements: Vec::new() }
+									};
+
+									let room = Room { id, body };
+									ast_nodes.push(TopLevel::Room(room));
 								},
 								_ => {},
 							}
@@ -555,18 +571,17 @@ mod tests {
 	}
 
 	#[test]
-	fn directive_parsing() {
-		let ast = parse_ok("#define FOO 1\n");
-		assert_eq!(ast, vec![TopLevel::Directive("define".to_string(), "FOO 1".to_string())]);
+	fn script_name_identifier_no_args() {
+		parse_err("script ROOM { }\n");
 	}
 
 	#[test]
 	fn script_name_identifier() {
-		let ast = parse_ok("script ROOM { }\n");
+		let ast = parse_ok("script ROOM() { }\n");
 		assert_eq!(
 			ast,
 			vec![TopLevel::Script(Script {
-				name: ScriptName::Identifier("ROOM".to_string()),
+				name: "ROOM".to_string(),
 				body: Block { statements: vec![] },
 			})]
 		);
@@ -574,22 +589,16 @@ mod tests {
 
 	#[test]
 	fn script_name_number() {
-		let ast = parse_ok("script 5 { }\n");
-		assert_eq!(
-			ast,
-			vec![TopLevel::Script(Script {
-				name: ScriptName::Number(5),
-				body: Block { statements: vec![] },
-			})]
-		);
+		parse_err("script 5 { }\n");
+		parse_err("script 5() { }\n");
 	}
 
 	#[test]
 	fn object_with_verbs() {
-		let src = r#"object OBJ "Name" {
-    class Cls;
-    verb vOne;
-    verb vTwo {
+		let src = r#"object OBJ {
+    class = {Cls};
+    verb vOne();
+    verb vTwo() {
         call();
     }
 }"#;
@@ -599,7 +608,6 @@ mod tests {
 		match &ast[0] {
 			TopLevel::Object(obj) => {
 				assert_eq!(obj.id, "OBJ");
-				assert_eq!(obj.name, "\"Name\"");
 				assert_eq!(obj.body.statements.len(), 3);
 
 				matches!(obj.body.statements[0], Statement::ClassDeclaration(_));
@@ -631,7 +639,7 @@ mod tests {
 
 	#[test]
 	fn while_loop() {
-		let src = r#"script S {
+		let src = r#"script S() {
     while (1) {
         call();
     }
@@ -661,7 +669,7 @@ mod tests {
 
 	#[test]
 	fn if_else_condition() {
-		let src = r#"script S {
+		let src = r#"script S() {
     if (cond == 1) {
         a();
     } else {
@@ -708,7 +716,7 @@ mod tests {
 
 	#[test]
 	fn variable_declaration() {
-		let src = r#"script S {
+		let src = r#"script S() {
     string code = prompt("hi");
 }"#;
 		let ast = parse_ok(src);
@@ -734,27 +742,9 @@ mod tests {
 	}
 
 	#[test]
-	fn state_statement() {
-		let src = r#"object OBJ "o" {
-    state 0 open=1;
-}"#;
-		let ast = parse_ok(src);
-		if let TopLevel::Object(obj) = &ast[0] {
-			if let Statement::State(state) = &obj.body.statements[0] {
-				assert_eq!(state.number, 0);
-				assert_eq!(state.assignments.len(), 1);
-				assert_eq!(state.assignments[0].0, "open");
-				assert_eq!(state.assignments[0].1, Primary::Number(1));
-			} else {
-				panic!("expected state statement");
-			}
-		}
-	}
-
-	#[test]
 	fn class_definition() {
 		let src = r#"class C {
-    verb vRun { run(); }
+    verb vRun() { run(); }
 }"#;
 		let ast = parse_ok(src);
 		if let TopLevel::Class(class) = &ast[0] {
@@ -779,7 +769,7 @@ mod tests {
 
 	#[test]
 	fn logical_and_equality_expression() {
-		let src = r#"script S {
+		let src = r#"script S() {
     if (a() && b == c) { }
 }"#;
 		let ast = parse_ok(src);
@@ -814,13 +804,13 @@ mod tests {
 
 	#[test]
 	fn property_assignment() {
-		let src = r#"object O "o" {
-    initialRoom 0;
+		let src = r#"object O {
+    state = 0;
 }"#;
 		let ast = parse_ok(src);
 		if let TopLevel::Object(obj) = &ast[0] {
 			if let Statement::PropertyAssignment(prop) = &obj.body.statements[0] {
-				assert_eq!(prop.name, "initialRoom");
+				assert_eq!(prop.name, "state");
 				assert_eq!(prop.value, PropertyValue::Number(0));
 			} else {
 				panic!("expected property assignment");
@@ -832,10 +822,11 @@ mod tests {
 
 	#[test]
 	fn arithmetic_precedence() {
-		let src = r#"script S {
+		let src = r#"script S() {
     a = 3 + 4 * 5;
 }"#;
 		let ast = parse_ok(src);
+		println!("AST: {:?}", ast);
 		if let TopLevel::Script(script) = &ast[0] {
 			if let Statement::Expression(Expression::Assignment(_, expr)) = &script.body.statements[0] {
 				if let Expression::Term(left, op, right) = &**expr {
@@ -870,7 +861,7 @@ mod tests {
 
 	#[test]
 	fn function_call_arguments() {
-		let src = r#"script S {
+		let src = r#"script S() {
     call(1, 2, 3);
 }"#;
 		let ast = parse_ok(src);
@@ -897,26 +888,6 @@ mod tests {
 	}
 
 	#[test]
-	fn multi_state_assignments() {
-		let src = r#"object O "o" {
-    state 1 a=1 b=2;
-}"#;
-		let ast = parse_ok(src);
-		if let TopLevel::Object(obj) = &ast[0] {
-			if let Statement::State(state) = &obj.body.statements[0] {
-				assert_eq!(state.number, 1);
-				assert_eq!(state.assignments.len(), 2);
-				assert_eq!(state.assignments[0].0, "a");
-				assert_eq!(state.assignments[0].1, Primary::Number(1));
-				assert_eq!(state.assignments[1].0, "b");
-				assert_eq!(state.assignments[1].1, Primary::Number(2));
-			} else {
-				panic!("expected state statement");
-			}
-		}
-	}
-
-	#[test]
 	fn parse_example_script() {
 		let src = include_str!("../example.sc");
 		let ast = parse_ok(src);
@@ -925,19 +896,13 @@ mod tests {
 
 	#[test]
 	fn invalid_missing_semicolon() {
-		let src = "script S { string a = 1 }";
-		parse_err(src);
-	}
-
-	#[test]
-	fn invalid_object_syntax() {
-		let src = "object O { }";
+		let src = "script S() { string a = 1 }";
 		parse_err(src);
 	}
 
 	#[test]
 	fn invalid_unclosed_block() {
-		let src = "script S {";
+		let src = "script S() {";
 		parse_err(src);
 	}
 }

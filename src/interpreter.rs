@@ -8,21 +8,42 @@ use std::{
 
 use crate::ast::*;
 use futures::{FutureExt, future::LocalBoxFuture};
+use indexmap::IndexMap;
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, Element};
+
+
+pub enum Declaration {
+	Script(Block),
+	Object(ObjectDef),
+	Class(ObjectDef),
+	Room(RoomDef),
+}
 
 
 // ---------------------------------------------------------------------------
 // Runtime object definition (built from the AST once at start-up)
 // ---------------------------------------------------------------------------
-struct ObjectDef {
-	id: i32,
-	name: String, // human readable name
-	#[allow(dead_code)]
-	verbs: HashMap<String, Block>, // vLook, vOpen, …
-	init_room: i32, // 0 = nowhere / inventory only
-	init_state: u32,
-	costume: Option<i32>, // costume number for visual display
+#[derive(Default)]
+pub struct ObjectDef {
+	pub name: String,                  // human readable name
+	pub classes: Vec<String>,          // List of classes this object inherits
+	pub verbs: HashMap<String, Block>, // vLook, vOpen, …
+	pub room: u32,                     // 0 = nowhere / inventory only
+	pub state: u32,
+	pub states: Vec<String>, // List of image paths for each state (starting at state 1)
+	pub x: i32,              // x position in pixels
+	pub y: i32,              // y position in pixels
+	pub width: u32,          // width in pixels
+	pub height: u32,         // height in pixels
+}
+
+
+#[derive(Default)]
+pub struct RoomDef {
+	pub name: String,
+	pub entry_script: Option<Block>, // Script to run when entering this room
+	pub image: Option<String>,       // Background image for the room
 }
 
 
@@ -42,7 +63,7 @@ pub struct Ctx {
 struct WebInterface {
 	document: Document,
 	game_container: Element,
-	room_container: Element,
+	//room_container: Element,
 }
 
 impl WebInterface {
@@ -75,46 +96,46 @@ impl WebInterface {
 		Ok(WebInterface {
 			document,
 			game_container,
-			room_container,
+			//room_container,
 		})
 	}
 
-	fn create_object_div(&self, object_def: &ObjectDef, _room_id: i32) -> Result<Element, JsValue> {
-		let div = self.document.create_element("div")?;
-		div.set_attribute("id", &format!("object-{}", object_def.id))?;
-		div.set_attribute("class", "game-object")?;
-		div.set_attribute("data-object-id", &object_def.id.to_string())?;
+	//fn create_object_div(&self, object_def: &ObjectDef, _room_id: i32) -> Result<Element, JsValue> {
+	//	let div = self.document.create_element("div")?;
+	//div.set_attribute("id", &format!("object-{}", object_def.id))?;
+	//	div.set_attribute("class", "game-object")?;
+	//div.set_attribute("data-object-id", &object_def.id.to_string())?;
 
-		// Basic positioning and styling
-		let mut style = "position: absolute; cursor: pointer; border: 1px solid #666; padding: 5px; background: #333; color: white; font-family: monospace; font-size: 12px;".to_string();
+	// Basic positioning and styling
+	//	let style = "position: absolute; cursor: pointer; border: 1px solid #666; padding: 5px; background: #333; color: white; font-family: monospace; font-size: 12px;".to_string();
 
-		// Set costume-based appearance
-		if let Some(costume) = object_def.costume {
-			// For now, use costume number as a simple visual indicator
-			// Later this would load actual image files
-			style.push_str(&format!(
-				" background-image: url('obj{:03}.png'); background-size: contain; background-repeat: no-repeat; width: 32px; height: 32px;",
-				costume
-			));
-			div.set_inner_html(&format!("<span style='display:none'>{}</span>", object_def.name));
-		} else {
-			// No costume - show as text
-			div.set_inner_html(&object_def.name);
-			style.push_str(" min-width: 60px; text-align: center;");
-		}
+	// Set costume-based appearance
+	/*if let Some(costume) = object_def.costume {
+		// For now, use costume number as a simple visual indicator
+		// Later this would load actual image files
+		style.push_str(&format!(
+			" background-image: url('obj{:03}.png'); background-size: contain; background-repeat: no-repeat; width: 32px; height: 32px;",
+			costume
+		));
+		div.set_inner_html(&format!("<span style='display:none'>{}</span>", object_def.name));
+	} else {
+		// No costume - show as text
+		div.set_inner_html(&object_def.name);
+		style.push_str(" min-width: 60px; text-align: center;");
+	}*/
 
-		// Random positioning for now (later would be specified in the script)
-		let x = (object_def.id * 37) % 500; // Simple pseudo-random positioning
-		let y = (object_def.id * 73) % 350;
-		style.push_str(&format!(" left: {}px; top: {}px;", x, y));
+	// Random positioning for now (later would be specified in the script)
+	//let x = (object_def.id * 37) % 500; // Simple pseudo-random positioning
+	//let y = (object_def.id * 73) % 350;
+	//style.push_str(&format!(" left: {}px; top: {}px;", x, y));
 
-		div.set_attribute("style", &style)?;
-		div.set_attribute("title", &object_def.name)?;
+	//	div.set_attribute("style", &style)?;
+	//	div.set_attribute("title", &object_def.name)?;
 
-		Ok(div)
-	}
+	//	Ok(div)
+	//}
 
-	fn show_object(&self, object_id: i32, _room_id: i32) -> Result<(), JsValue> {
+	/*fn show_object(&self, object_id: i32, _room_id: i32) -> Result<(), JsValue> {
 		if let Some(div) = self.document.get_element_by_id(&format!("object-{}", object_id)) {
 			div.set_attribute("style", &div.get_attribute("style").unwrap_or_default().replace("display: none;", ""))?;
 		}
@@ -127,7 +148,7 @@ impl WebInterface {
 			div.set_attribute("style", &format!("{}; display: none;", current_style))?;
 		}
 		Ok(())
-	}
+	}*/
 
 	fn display_message(&self, message: &str) -> Result<(), JsValue> {
 		// Create or update message area
@@ -193,10 +214,8 @@ impl Value {
 // ---------------------------------------------------------------------------
 #[derive(Default)]
 struct World {
-	object_state: HashMap<i32, u32>, // OBJ -> current state number
-	object_room: HashMap<i32, i32>,  // OBJ -> room id (0 = nowhere)
-	inventory: HashSet<i32>,         // OBJ currently held by player
-	current_room: i32,
+	inventory: HashSet<u32>, // OBJ currently held by player
+	current_room: u32,
 }
 
 
@@ -214,191 +233,40 @@ struct Task {
 pub struct Interpreter {
 	//tasks: VecDeque<Task>, // RUNNABLE queue
 	pub builtins: Rc<HashMap<String, Rc<BuiltinFn>>>,
-	scripts: Rc<HashMap<String, Script>>,
-	pub consts: Rc<HashMap<String, Value>>,
+	//scripts: Rc<HashMap<String, Script>>,
+	//pub consts: Rc<HashMap<String, Value>>,
 	world: Rc<RefCell<World>>,
-	objects: Rc<HashMap<i32, ObjectDef>>, // id → def
-	#[allow(dead_code)]
-	object_names: Rc<HashMap<String, i32>>, // lowercase name → id  (for parser)
-	web_interface: WebInterface,          // Web DOM interface
+	//objects: Rc<RefCell<HashMap<i32, ObjectDef>>>, // id → def
+	//#[allow(dead_code)]
+	//object_names: Rc<HashMap<String, i32>>, // lowercase name → id
+	web_interface: WebInterface, // Web DOM interface
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
+	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
 }
 
 impl Interpreter {
-	// --------------------------------------------------
-	// Construction
-	// --------------------------------------------------
 	pub fn new(ast: &[TopLevel]) -> Self {
-		let mut scripts = HashMap::new();
-		let mut consts = HashMap::new();
-		let mut class_verbs = HashMap::new();
-
-		// Pass 1 – collect scripts, defines, and classes
-		for tl in ast {
-			match tl {
-				TopLevel::Script(s) => match &s.name {
-					ScriptName::Identifier(name) => {
-						scripts.insert(name.clone(), s.clone());
-					},
-					ScriptName::Number(n) => {
-						scripts.insert(n.to_string(), s.clone());
-					},
-				},
-				TopLevel::Directive(name, val) if name == "define" => {
-					let mut parts = val.split_whitespace();
-					if let Some(ident) = parts.next() {
-						if let Some(rest) = parts.next() {
-							if let Ok(n) = rest.parse::<i32>() {
-								consts.insert(ident.to_string(), Value::Number(n));
-							} else {
-								consts.insert(ident.to_string(), Value::Str(rest.to_string()));
-							}
-						}
-					}
-				},
-				TopLevel::Class(c) => {
-					for st in &c.body.statements {
-						if let Statement::Verb(v) = st {
-							if let Some(body) = &v.body {
-								class_verbs
-									.entry(c.name.clone())
-									.or_insert_with(HashMap::new)
-									.insert(v.name.clone(), body.clone());
-							}
-						}
-					}
-				},
-				_ => {},
-			}
-		}
-
-		// Pass 2 – build objects
-		let mut objects = HashMap::new();
-		let mut object_names = HashMap::new();
-
-		for tl in ast {
-			if let TopLevel::Object(o) = tl {
-				// Resolve numeric id ⇒ the identifier *must* be in the #define table
-				let id_num = match consts.get(&o.id) {
-					Some(Value::Number(n)) => *n,
-					_ => {
-						web_sys::console::warn_1(&JsValue::from_str(&format!("[warn] object id {} has no #define – using 0", o.id)));
-						0
-					},
-				};
-
-				let mut verbs = HashMap::new();
-				let mut declared_classes = Vec::new();
-				let mut init_room = 0;
-				let mut init_state = 0;
-				let mut has_init_room = false;
-				let mut costume = None;
-
-				for st in &o.body.statements {
-					match st {
-						Statement::Verb(v) if v.body.is_some() => {
-							verbs.insert(v.name.clone(), v.body.as_ref().unwrap().clone());
-						},
-						Statement::PropertyAssignment(p) if p.name == "initialRoom" => {
-							init_room = match &p.value {
-								PropertyValue::Number(n) => *n as i32,
-								PropertyValue::Identifier(ident) => consts
-									.get(ident)
-									.and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
-									.unwrap_or(0),
-								_ => 0,
-							};
-							has_init_room = true;
-						},
-						Statement::PropertyAssignment(p) if p.name == "costume" => {
-							costume = match &p.value {
-								PropertyValue::Number(n) => Some(*n as i32),
-								PropertyValue::Identifier(ident) => consts.get(ident).and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None }),
-								_ => None,
-							};
-						},
-						Statement::ClassDeclaration(name) => declared_classes.push(name.clone()),
-						Statement::State(s) => init_state = s.number,
-						_ => {},
-					}
-				}
-
-				/* -------- bring in verbs from each declared class -------- */
-				for cname in declared_classes {
-					if let Some(cverbs) = class_verbs.get(&cname) {
-						for (vname, block) in cverbs {
-							// object-level verb overrides class verb with same name
-							verbs.entry(vname.clone()).or_insert(block.clone());
-						}
-					} else {
-						eprintln!("[warn] class '{}' not found", cname);
-					}
-				}
-
-				if !has_init_room {
-					// use #define ROOM_ID if present, otherwise fall back to 1
-					init_room = consts
-						.get("ROOM_ID")
-						.and_then(|v| if let Value::Number(n) = v { Some(*n) } else { None })
-						.unwrap_or(1);
-				}
-
-				let def = ObjectDef {
-					id: id_num,
-					name: o.name.trim_matches('"').to_owned(),
-					verbs,
-					init_room,
-					init_state,
-					costume,
-				};
-				objects.insert(id_num, def);
-			}
-		}
-
-		let mut world = World::default();
-		for (id, def) in &objects {
-			if def.init_room != 0 {
-				world.object_room.insert(*id, def.init_room);
-			}
-			world.object_state.insert(*id, def.init_state);
-		}
-
-		// build reverse lookup for the command parser
-		for (id, def) in &objects {
-			object_names.insert(def.name.to_lowercase(), *id);
-		}
-
-		scripts
-			.get("1")
-			.or_else(|| scripts.get("ROOM_ID"))
-			.or_else(|| scripts.iter().next().map(|(_, script)| script))
-			.map(|script| script.name.clone());
-
-		let this = Self {
+		// Initialize the interpreter
+		let this = Interpreter {
 			builtins: Rc::new(build_builtins()),
-			scripts: Rc::new(scripts),
-			consts: Rc::new(consts),
-			world: Rc::new(RefCell::new(world)),
-			objects: Rc::new(objects),
-			object_names: Rc::new(object_names),
+			world: Rc::new(RefCell::new(World::default())),
 			web_interface: WebInterface::new().unwrap(),
 			run_queue: Rc::new(RefCell::new(VecDeque::new())),
+			declarations: Rc::new(RefCell::new(IndexMap::new())),
 		};
 
-		// Spawn initial script
-		// Looks for a script with ID 1 (ROOM_ID), fallsback to first script
-		let entry_script = if this.scripts.contains_key("1") {
-			Some("1".to_owned())
-		} else if this.scripts.contains_key("ROOM_ID") {
-			Some("ROOM_ID".to_owned())
-		} else {
-			// Fallback to first script if no entry point is defined
-			this.scripts.iter().next().map(|(name, _)| name.clone())
-		};
-
-		if let Some(script_name) = entry_script {
-			this.spawn_script(&script_name);
+		// Execute the AST to build up all the declarations
+		for tl in ast {
+			match tl.exec(&this) {
+				Ok(_) => {},
+				Err(err) => {
+					web_sys::console::error_1(&JsValue::from_str(&format!("Error executing top-level statement: {:?}", err)));
+				},
+			}
 		}
+
+		// Start the main script
+		this.spawn_script("main");
 
 		this
 	}
@@ -408,17 +276,17 @@ impl Interpreter {
 	// --------------------------------------------------
 	pub fn init_web_interface(&self) -> Result<(), JsValue> {
 		// Create divs for all objects in the current room
-		for (id, def) in &*self.objects {
-			if def.init_room == self.world.borrow().current_room || def.init_room == 1 {
-				let object_div = self.web_interface.create_object_div(def, def.init_room)?;
+		/*for (id, def) in &*self.objects {
+			if def.room == self.world.borrow().current_room {
+				let object_div = self.web_interface.create_object_div(def, def.room)?;
 				self.web_interface.room_container.append_child(&object_div)?;
 
 				// Hide objects that are initially not in room (initialRoom 0)
-				if def.init_room == 0 {
+				if def.room == 0 {
 					self.web_interface.hide_object(*id)?;
 				}
 			}
-		}
+		}*/
 		Ok(())
 	}
 
@@ -434,41 +302,44 @@ impl Interpreter {
 	}
 
 	fn spawn_script(&self, key: &str) {
-		if let Some(scr) = self.scripts.get(key) {
-			eprintln!("[info] startScript -> {}", key);
-			let ctx = Ctx {
-				vars: Rc::new(RefCell::new(HashMap::new())),
-				delay: Rc::new(RefCell::new(0)),
-				interpreter: self.clone(),
-			};
-			let script = scr.clone();
-			let key = key.to_string();
-			let cloned_ctx = ctx.clone();
-			let task = Task {
-				fut: Box::pin(async move {
-					if let Err(err) = script.body.exec(&ctx).await {
-						web_sys::console::error_1(&JsValue::from_str(&format!("Error executing script {}: {:?}", key, err)));
-					} else {
-						web_sys::console::log_1(&JsValue::from_str(&format!("Script {} executed successfully", key)));
-					}
-				}),
-				ctx: cloned_ctx,
-			};
-			self.run_queue.borrow_mut().push_back(task);
-		} else {
-			eprintln!("[warn] startScript: unknown script {key}");
-		}
+		let script = self.declarations.borrow().get(key).and_then(|decl| match decl {
+			Declaration::Script(script) => Some(script.clone()),
+			_ => None,
+		});
+		let script = match script {
+			Some(script) => script,
+			None => {
+				web_sys::console::error_1(&JsValue::from_str(&format!("Unknown script: {}", key)));
+				return;
+			},
+		};
+
+		eprintln!("[info] startScript -> {}", key);
+		let ctx = Ctx {
+			vars: Rc::new(RefCell::new(HashMap::new())),
+			delay: Rc::new(RefCell::new(0)),
+			interpreter: self.clone(),
+		};
+		let key = key.to_string();
+		let cloned_ctx = ctx.clone();
+		let task = Task {
+			fut: Box::pin(async move {
+				if let Err(err) = script.exec(&ctx).await {
+					web_sys::console::error_1(&JsValue::from_str(&format!("Error executing script {}: {:?}", key, err)));
+				} else {
+					web_sys::console::log_1(&JsValue::from_str(&format!("Script {} executed successfully", key)));
+				}
+			}),
+			ctx: cloned_ctx,
+		};
+		self.run_queue.borrow_mut().push_back(task);
 	}
 
-	fn to_id(&self, v: &Value) -> i32 {
+	fn to_id(&self, v: &Value) -> u32 {
 		match v {
-			Value::Number(n) => *n,
+			Value::Number(n) => (*n).try_into().unwrap_or(0), // Convert i32 to u32, default to 0 if negative
 			Value::Str(s) => {
-				if let Some(Value::Number(n)) = self.consts.get(s) {
-					*n
-				} else {
-					0 // unknown -> 0
-				}
+				self.declarations.borrow().get_index_of(s).map(|id| id as u32).unwrap_or(0) // 0 = unknown
 			},
 			_ => 0,
 		}
@@ -519,6 +390,51 @@ impl Interpreter {
 		}
 
 		web_sys::console::log_1(&JsValue::from_str("Interpreter finished executing scripts"));
+	}
+
+	pub fn add_declaration<K: Into<String>>(&self, name: K, decl: Declaration) -> Result<u32, anyhow::Error> {
+		match self.declarations.borrow_mut().entry(name.into()) {
+			indexmap::map::Entry::Occupied(entry) => {
+				// Declaration already exists, return an error
+				anyhow::bail!("Declaration for '{}' already exists", entry.key());
+			},
+			indexmap::map::Entry::Vacant(entry) => {
+				// Insert the new declaration
+				let id = entry.index() as u32;
+				entry.insert(decl);
+				Ok(id)
+			},
+		}
+	}
+
+	pub fn with_object_by_name<F, R>(&self, name: &str, f: F) -> Option<R>
+	where
+		F: FnOnce(&ObjectDef) -> R,
+	{
+		self.declarations.borrow().get(name).and_then(|decl| match decl {
+			Declaration::Object(obj) => Some(f(obj)),
+			_ => None,
+		})
+	}
+
+	pub fn with_object_by_id<F, R>(&self, id: u32, f: F) -> Option<R>
+	where
+		F: FnOnce(&ObjectDef) -> R,
+	{
+		self.declarations.borrow().get_index(id as usize).and_then(|(_, decl)| match decl {
+			Declaration::Object(obj) => Some(f(obj)),
+			_ => None,
+		})
+	}
+
+	pub fn with_object_by_id_mut<F, R>(&self, id: u32, f: F) -> Option<R>
+	where
+		F: FnOnce(&mut ObjectDef) -> R,
+	{
+		self.declarations.borrow_mut().get_index_mut(id as usize).and_then(|(_, decl)| match decl {
+			Declaration::Object(obj) => Some(f(obj)),
+			_ => None,
+		})
 	}
 
 	// --------------------------------------------------
@@ -639,30 +555,6 @@ impl Interpreter {
 			}
 		}
 	}*/
-
-
-	#[allow(dead_code)]
-	fn describe_room(&self) {
-		println!();
-		println!("You are in room {}.", self.world.borrow().current_room);
-		let here: Vec<&ObjectDef> = self
-			.objects
-			.values()
-			.filter(|o| self.world.borrow().object_room.get(&o.id) == Some(&self.world.borrow().current_room))
-			.collect();
-		if here.is_empty() {
-			println!("Nothing of interest here.");
-		} else {
-			print!("You see: ");
-			for (i, o) in here.iter().enumerate() {
-				if i > 0 {
-					print!(", ");
-				}
-				print!("{}", o.name);
-			}
-			println!(".");
-		}
-	}
 }
 
 
@@ -709,10 +601,10 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	);
 
 	builtins.insert(
-		"breakHere".into(),
+		"breakScript".into(),
 		builtin_async(|_, _ctx| {
 			async move {
-				web_sys::console::log_1(&JsValue::from_str("Break here called!"));
+				web_sys::console::log_1(&JsValue::from_str("DEBUG: Break script called!"));
 				yield_now().await; // stop right here, resume next tick
 				Value::Null
 			}
@@ -771,41 +663,31 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	);
 
 	// ---- World manipulation stubs ----
+	// putActorAt(actor, x, y, room)
 	builtins.insert(
-		"putActorInRoom".into(),
+		"putActorAt".into(),
 		builtin_async(|args, ctx| {
 			async move {
-				if args.len() >= 2 {
-					let actor = ctx.interpreter.to_id(&args[0]);
-					let room = ctx.interpreter.to_id(&args[1]);
-					ctx.interpreter.world.borrow_mut().object_room.insert(actor, room);
-
-					if room == ctx.interpreter.world.borrow().current_room {
-						ctx.interpreter.web_interface.show_object(actor, room).unwrap_or_else(|e| {
-							web_sys::console::error_1(&JsValue::from_str(&format!("Error showing object: {:?}", e)));
-						});
-					}
-
-					web_sys::console::log_1(&JsValue::from_str(&format!("[actor {actor}] appears in room {room}")));
+				if args.len() != 4 {
+					web_sys::console::error_1(&JsValue::from_str("putActorAt requires exactly 4 arguments: actor, x, y, room"));
+					return Null;
 				}
+
+				let actor = ctx.interpreter.to_id(&args[0]);
+				let room = ctx.interpreter.to_id(&args[3]);
+
+				// NOT FULLY IMPLEMENTED YET
+				// Assumes the target actor is the player
+				// No position is tracked, so just updates the current room
+				ctx.interpreter.world.borrow_mut().current_room = room;
+
+				web_sys::console::log_1(&JsValue::from_str(&format!("[actor {actor}] appears in room {room}")));
 				Null
 			}
 			.boxed_local()
 		}),
 	);
 
-	builtins.insert(
-		"putActor".into(),
-		builtin_async(|args, _| {
-			async move {
-				if args.len() >= 3 {
-					println!("[actor {}] placed at {},{}", args[0].as_string(), args[1].as_string(), args[2].as_string());
-				}
-				Null
-			}
-			.boxed_local()
-		}),
-	);
 	builtins.insert(
 		"setCameraAt".into(),
 		builtin_async(|args, _| {
@@ -847,11 +729,17 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		"getState".into(),
 		builtin_async(|args, ctx| {
 			async move {
-				if let Some(obj) = args.first() {
-					let id = ctx.interpreter.to_id(obj);
-					let state = ctx.interpreter.world.borrow().object_state.get(&id).copied().unwrap_or(0);
+				if args.len() != 1 {
+					web_sys::console::error_1(&JsValue::from_str("getState requires exactly 1 argument: object"));
+					return Null;
+				}
+
+				let id = ctx.interpreter.to_id(&args[0]);
+
+				if let Some(state) = ctx.interpreter.with_object_by_id(id, |object| object.state) {
 					Value::Number(state as i32)
 				} else {
+					web_sys::console::warn_1(&JsValue::from_str(&format!("[object {id}] not found")));
 					Null
 				}
 			}
@@ -863,16 +751,24 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		"setState".into(),
 		builtin_async(|args, ctx| {
 			async move {
-				if args.len() >= 2 {
-					let obj = ctx.interpreter.to_id(&args[0]);
-					let val = args[1].as_number() as u32;
-					ctx.interpreter.world.borrow_mut().object_state.insert(obj, val);
-
-					// Log to web console and potentially update visual state
-					web_sys::console::log_1(&JsValue::from_str(&format!("[object {obj}] state set to {val}")));
-
-					// Future enhancement: update object visual appearance based on state
+				if args.len() != 2 {
+					web_sys::console::error_1(&JsValue::from_str("setState requires exactly 2 arguments: object, state"));
+					return Null;
 				}
+
+				let id = ctx.interpreter.to_id(&args[0]);
+				let state_value = args[1].as_number() as u32;
+
+				match ctx.interpreter.with_object_by_id_mut(id, |object| {
+					object.state = state_value;
+					web_sys::console::log_1(&JsValue::from_str(&format!("[object {id}] state set to {state_value}")));
+				}) {
+					Some(_) => {},
+					None => {
+						web_sys::console::warn_1(&JsValue::from_str(&format!("[object {id}] not found")));
+					},
+				}
+
 				Null
 			}
 			.boxed_local()
@@ -915,19 +811,9 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 
 	builtins.insert(
 		"pickupObject".into(),
-		builtin_async(|args, ctx| {
+		builtin_async(|_args, _ctx| {
 			async move {
-				if let Some(obj) = args.first() {
-					let id = ctx.interpreter.to_id(obj);
-					ctx.interpreter.world.borrow_mut().inventory.insert(id);
-
-					// Remove object from room and hide it in web interface
-					ctx.interpreter.web_interface.hide_object(id).unwrap_or_else(|e| {
-						web_sys::console::error_1(&JsValue::from_str(&format!("Error hiding object: {:?}", e)));
-					});
-
-					web_sys::console::log_1(&JsValue::from_str(&format!("You pick up object {id}")));
-				}
+				web_sys::console::log_1(&JsValue::from_str("pickupObject called – this is a stub!"));
 				Null
 			}
 			.boxed_local()

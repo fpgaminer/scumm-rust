@@ -2,33 +2,34 @@ WHITESPACE  = _{ " " | "	" | NEWLINE | COMMENT }
 NEWLINE     = _{ "\r\n" | "\n" }
 COMMENT     = _{ "/*" ~ (!("*/") ~ ANY)* ~ "*/" | "//" ~ (!(NEWLINE) ~ ANY)* }
 
-identifier  = @{ (ASCII_ALPHANUMERIC | "_")+ }
+identifier  = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 number      = @{ ASCII_DIGIT+ }
 string      = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
 
-file        =  { SOI ~ (directive | item)* ~ EOI }
+file        =  { SOI ~ (item)* ~ EOI }
 
-directive   =  { "#" ~ directive_name ~ directive_value? }
-directive_name = @{ identifier }
-directive_value = @{ (!NEWLINE ~ ANY)+ }
-item        =  { script_def | class_def | object_def }
+item        =  { script_def | class_def | object_def | room_def }
 
-script_def  =  { "script" ~ (number | identifier) ~ block }
-class_def   =  { "class"  ~ identifier ~ block }
-object_def  =  { "object" ~ identifier ~ string ~ block }
+script_def  =  { "script" ~ identifier ~ param_list ~ block }
+class_def   =  { "class"  ~ identifier ~ def_block }
+object_def  =  { "object" ~ identifier ~ def_block }
+room_def    =  { "room" ~ identifier ~ room_block }
+
+def_block   =  { "{" ~ (verb_stmt | states_assign | class_assign | prop_assign)* ~ "}" }
+room_block  =  { "{" ~ (prop_assign | verb_stmt | object_def | script_def)* ~ "}" }
 
 block       =  { "{" ~ stmt* ~ "}" }
-stmt        = _{ block | expr_stmt | control_stmt | class_stmt | verb_stmt | var_decl | prop_assign | state_stmt }
+stmt        = _{ block | expr_stmt | control_stmt | var_decl }
 
 expr_stmt   =  { expr ~ ";" }
 control_stmt=  { if_stmt | while_stmt }
-class_stmt  =  { "class" ~ identifier ~ ";" }
-verb_stmt   =  { "verb" ~ identifier ~ (";" | block) }
+verb_stmt   =  { "verb" ~ identifier ~ param_list ~ (";" | block) }
 var_decl    =  { identifier ~ identifier ~ "=" ~ expr ~ ";" }
-prop_assign =  { identifier ~ (number | string | identifier) ~ ";" }
-state_stmt  =  { "state" ~ number ~ (identifier ~ "=" ~ primary)* ~ ";" }
+prop_assign =  { identifier ~ "=" ~ (number | string | identifier) ~ ";" }
+states_assign = { "states" ~ "=" ~ states_array ~ ";" }
+class_assign = { "class" ~ "=" ~ class_array ~ ";" }
 
-if_stmt     =  { "if" ~ "(" ~ expr ~ ")" ~ block ~ ("else" ~ block)? }
+if_stmt     =  { "if" ~ "(" ~ expr ~ ")" ~ block ~ ("else" ~ (if_stmt | block))? }
 while_stmt  =  { "while" ~ "(" ~ expr ~ ")" ~ block }
 
 expr        =  _{ assignment }
@@ -47,3 +48,11 @@ unary       =  { ("!" | "-")* ~ primary }
 primary     =  { func_call | number | string | identifier | "(" ~ expr ~ ")" }
 func_call   =  { identifier ~ "(" ~ arg_list? ~ ")" }
 arg_list    =  { expr ~ ("," ~ expr)* }
+
+param_list  =  { "(" ~ (param ~ ("," ~ param)*)? ~ ")" }
+param       =  { identifier ~ identifier }
+
+states_array = { "{" ~ state_entry* ~ "}" }
+state_entry  = { "{" ~ number ~ "," ~ number ~ "," ~ string ~ "}" ~ ","? }
+
+class_array  = { "{" ~ identifier ~ ("," ~ identifier)* ~ "}" }

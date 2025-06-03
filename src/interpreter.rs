@@ -65,6 +65,27 @@ pub struct RoomDef {
 	pub image: Option<String>,       // Background image for the room
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ObjectSnapshot {
+	state: u32,
+	x: i32,
+	y: i32,
+	width: u32,
+	height: u32,
+}
+
+impl From<&ObjectDef> for ObjectSnapshot {
+	fn from(obj: &ObjectDef) -> Self {
+		ObjectSnapshot {
+			state: obj.state,
+			x: obj.x,
+			y: obj.y,
+			width: obj.width,
+			height: obj.height,
+		}
+	}
+}
+
 
 /// SCUMM VM task context
 #[derive(Clone)]
@@ -156,7 +177,10 @@ impl WebInterface {
 		game_container.set_attribute("id", "game-container")?;
 		game_container.set_attribute(
 			"style",
-			&format!("position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;", container_width, container_height),
+			&format!(
+				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
+				container_width, container_height
+			),
 		)?;
 
 		// Create room container for objects
@@ -180,7 +204,7 @@ impl WebInterface {
 			container_width,
 			container_height,
 			current_room_image: Rc::new(RefCell::new(None)),
-			room_image_width: Rc::new(RefCell::new(640.0)), // Default fallback
+			room_image_width: Rc::new(RefCell::new(640.0)),  // Default fallback
 			room_image_height: Rc::new(RefCell::new(480.0)), // Default fallback
 		})
 	}
@@ -189,13 +213,13 @@ impl WebInterface {
 		let style = if let Some(img) = image {
 			// Store the current room image path
 			*self.current_room_image.borrow_mut() = Some(img.to_string());
-			
+
 			// Load the image to get its natural dimensions
 			let image_element = web_sys::HtmlImageElement::new()?;
 			let room_image_width = self.room_image_width.clone();
 			let room_image_height = self.room_image_height.clone();
 			let image_element_clone = image_element.clone();
-			
+
 			// Create a closure to handle image load
 			let onload = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 				let width = image_element_clone.natural_width() as f64;
@@ -204,18 +228,21 @@ impl WebInterface {
 				*room_image_height.borrow_mut() = height;
 				web_sys::console::log_1(&format!("Room image loaded: {}x{}", width, height).into());
 			}) as Box<dyn Fn()>);
-			
+
 			image_element.set_onload(Some(onload.as_ref().unchecked_ref()));
 			onload.forget(); // Keep the closure alive
 			image_element.set_src(img);
-			
+
 			format!(
 				"position: relative; width: {}px; height: {}px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
 				self.container_width, self.container_height, img
 			)
 		} else {
 			*self.current_room_image.borrow_mut() = None;
-			format!("position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;", self.container_width, self.container_height)
+			format!(
+				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
+				self.container_width, self.container_height
+			)
 		};
 		self.game_container.set_attribute("style", &style)
 	}
@@ -250,13 +277,13 @@ impl WebInterface {
 		let room_height = *self.room_image_height.borrow();
 		let container_ratio = self.container_width / self.container_height;
 		let room_ratio = room_width / room_height;
-		
+
 		let (scale_x, scale_y) = if container_ratio > room_ratio {
 			// Container is wider than room aspect ratio - scale based on height
 			let scale = self.container_height / room_height;
 			(scale, scale)
 		} else {
-			// Container is taller than room aspect ratio - scale based on width  
+			// Container is taller than room aspect ratio - scale based on width
 			let scale = self.container_width / room_width;
 			(scale, scale)
 		};
@@ -423,6 +450,7 @@ pub struct Interpreter {
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
 	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
 	last_room: RefCell<u32>,
+	last_objects: RefCell<HashMap<u32, Option<ObjectSnapshot>>>,
 }
 
 impl Interpreter {
@@ -435,6 +463,7 @@ impl Interpreter {
 			run_queue: Rc::new(RefCell::new(VecDeque::new())),
 			declarations: Rc::new(RefCell::new(IndexMap::new())),
 			last_room: RefCell::new(0),
+			last_objects: RefCell::new(HashMap::new()),
 		};
 
 		// Execute the AST to build up all the declarations
@@ -670,10 +699,15 @@ impl Interpreter {
 		let image = self.with_room_by_id(room_id, |r| r.image.clone()).flatten();
 		self.web_interface.set_room_background(image.as_deref())?;
 
+		let mut last_objects = self.last_objects.borrow_mut();
+
 		for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
 			if let Declaration::Object(obj) = decl {
 				if obj.room == room_id && obj.state > 0 {
 					self.web_interface.render_object(i as u32, obj)?;
+					last_objects.insert(i as u32, Some(ObjectSnapshot::from(obj)));
+				} else {
+					last_objects.insert(i as u32, None);
 				}
 			}
 		}
@@ -681,12 +715,37 @@ impl Interpreter {
 	}
 
 	fn update_objects(&self, room_id: u32) -> Result<(), JsValue> {
+		let mut last_objects = self.last_objects.borrow_mut();
 		for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
 			if let Declaration::Object(obj) = decl {
-				if obj.room != room_id || obj.state == 0 {
-					self.web_interface.remove_object(i as u32);
-				} else {
-					self.web_interface.render_object(i as u32, obj)?;
+				let id = i as u32;
+				let visible = obj.room == room_id && obj.state > 0;
+				match (last_objects.get(&id), visible) {
+					(Some(Some(snapshot)), true) => {
+						let current = ObjectSnapshot::from(obj);
+						if *snapshot != current {
+							self.web_interface.render_object(id, obj)?;
+							last_objects.insert(id, Some(current));
+						}
+					},
+					(Some(Some(_)), false) => {
+						self.web_interface.remove_object(id);
+						last_objects.insert(id, None);
+					},
+					(Some(None), true) => {
+						self.web_interface.render_object(id, obj)?;
+						last_objects.insert(id, Some(ObjectSnapshot::from(obj)));
+					},
+					(Some(None), false) => {
+						// remain hidden
+					},
+					(None, true) => {
+						self.web_interface.render_object(id, obj)?;
+						last_objects.insert(id, Some(ObjectSnapshot::from(obj)));
+					},
+					(None, false) => {
+						last_objects.insert(id, None);
+					},
 				}
 			}
 		}

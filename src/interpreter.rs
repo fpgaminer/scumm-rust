@@ -158,8 +158,8 @@ struct WebInterface {
 	container_width: f64,
 	container_height: f64,
 	current_room_image: Rc<RefCell<Option<String>>>,
-	room_image_width: Rc<RefCell<f64>>,
-	room_image_height: Rc<RefCell<f64>>,
+	scale_x: Rc<RefCell<f64>>,
+	scale_y: Rc<RefCell<f64>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -186,7 +186,10 @@ impl WebInterface {
 		// Create room container for objects
 		let room_container = document.create_element("div")?;
 		room_container.set_attribute("id", "room-container")?;
-		room_container.set_attribute("style", "position: relative; width: 100%; height: 100%;")?;
+		room_container.set_attribute(
+			"style",
+			"position: relative; width: 100%; height: 100%; transform-origin: top left; transform: scale(1, 1);",
+		)?;
 
 		game_container.append_child(&room_container)?;
 
@@ -204,8 +207,8 @@ impl WebInterface {
 			container_width,
 			container_height,
 			current_room_image: Rc::new(RefCell::new(None)),
-			room_image_width: Rc::new(RefCell::new(640.0)),  // Default fallback
-			room_image_height: Rc::new(RefCell::new(480.0)), // Default fallback
+			scale_x: Rc::new(RefCell::new(1.0)),
+			scale_y: Rc::new(RefCell::new(1.0)),
 		})
 	}
 
@@ -216,17 +219,36 @@ impl WebInterface {
 
 			// Load the image to get its natural dimensions
 			let image_element = web_sys::HtmlImageElement::new()?;
-			let room_image_width = self.room_image_width.clone();
-			let room_image_height = self.room_image_height.clone();
+			let scale_x = self.scale_x.clone();
+			let scale_y = self.scale_y.clone();
+			let room_container = self.room_container.clone();
+			let container_width = self.container_width;
+			let container_height = self.container_height;
 			let image_element_clone = image_element.clone();
 
 			// Create a closure to handle image load
 			let onload = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 				let width = image_element_clone.natural_width() as f64;
 				let height = image_element_clone.natural_height() as f64;
-				*room_image_width.borrow_mut() = width;
-				*room_image_height.borrow_mut() = height;
-				web_sys::console::log_1(&format!("Room image loaded: {}x{}", width, height).into());
+				let container_ratio = container_width / container_height;
+				let room_ratio = width / height;
+				let (sx, sy) = if container_ratio > room_ratio {
+					let s = container_height / height;
+					(s, s)
+				} else {
+					let s = container_width / width;
+					(s, s)
+				};
+				*scale_x.borrow_mut() = sx;
+				*scale_y.borrow_mut() = sy;
+				let _ = room_container.set_attribute(
+					"style",
+					&format!(
+						"position: relative; width: 100%; height: 100%; transform-origin: top left; transform: scale({}, {});",
+						sx, sy
+					),
+				);
+				web_sys::console::log_1(&format!("Room image loaded: {}x{} scale {} {}", width, height, sx, sy).into());
 			}) as Box<dyn Fn()>);
 
 			image_element.set_onload(Some(onload.as_ref().unchecked_ref()));
@@ -239,6 +261,12 @@ impl WebInterface {
 			)
 		} else {
 			*self.current_room_image.borrow_mut() = None;
+			*self.scale_x.borrow_mut() = 1.0;
+			*self.scale_y.borrow_mut() = 1.0;
+			self.room_container.set_attribute(
+				"style",
+				"position: relative; width: 100%; height: 100%; transform-origin: top left; transform: scale(1, 1);",
+			)?;
 			format!(
 				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
 				self.container_width, self.container_height
@@ -271,32 +299,9 @@ impl WebInterface {
 			},
 		};
 
-		// Calculate scaling factor based on actual room image dimensions to container size
-		// Using "cover" scaling behavior: scale to fill container while maintaining aspect ratio
-		let room_width = *self.room_image_width.borrow();
-		let room_height = *self.room_image_height.borrow();
-		let container_ratio = self.container_width / self.container_height;
-		let room_ratio = room_width / room_height;
-
-		let (scale_x, scale_y) = if container_ratio > room_ratio {
-			// Container is wider than room aspect ratio - scale based on height
-			let scale = self.container_height / room_height;
-			(scale, scale)
-		} else {
-			// Container is taller than room aspect ratio - scale based on width
-			let scale = self.container_width / room_width;
-			(scale, scale)
-		};
-
-		// Apply scaling to object coordinates
-		let scaled_x = (obj.x as f64 * scale_x) as i32;
-		let scaled_y = (obj.y as f64 * scale_y) as i32;
-		let scaled_width = (obj.width as f64 * scale_x) as u32;
-		let scaled_height = (obj.height as f64 * scale_y) as u32;
-
 		let mut style = format!(
 			"position: absolute; left: {}px; top: {}px; width: {}px; height: {}px;",
-			scaled_x, scaled_y, scaled_width, scaled_height
+			obj.x, obj.y, obj.width, obj.height
 		);
 		if obj.state > 0 {
 			if let Some(img) = obj.states.get(obj.state as usize - 1) {

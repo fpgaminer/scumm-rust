@@ -200,7 +200,7 @@ impl WebInterface {
 			document.body().unwrap().append_child(&game_container)?;
 		}
 
-		Ok(WebInterface {
+		let web_interface = WebInterface {
 			document,
 			game_container,
 			room_container,
@@ -209,7 +209,12 @@ impl WebInterface {
 			current_room_image: Rc::new(RefCell::new(None)),
 			scale_x: Rc::new(RefCell::new(1.0)),
 			scale_y: Rc::new(RefCell::new(1.0)),
-		})
+		};
+
+		// Ensure the message box exists so it's visible immediately
+		web_interface.display_message("")?;
+
+		Ok(web_interface)
 	}
 
 	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {

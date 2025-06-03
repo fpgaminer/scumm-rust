@@ -1085,6 +1085,24 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	);
 
 	builtins.insert(
+		"egoSay".into(),
+		builtin_async(|args, ctx| {
+			async move {
+				if let Some(arg) = args.first() {
+					let txt = arg.as_string();
+					let message = txt.trim_matches('"');
+
+					ctx.interpreter.web_interface.display_message(message).unwrap_or_else(|_| {
+						info!("{}", message);
+					});
+				}
+				Null
+			}
+			.boxed_local()
+		}),
+	);
+
+	builtins.insert(
 		"prompt".into(),
 		builtin_async(|args, _| {
 			async move {

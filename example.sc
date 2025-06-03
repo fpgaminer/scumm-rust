@@ -50,6 +50,11 @@ room Arbeitszimmer
             { 0, 0, "tresor_open.png" },    // state = 3
         };
 
+        verb vLook(int this, int that)
+        {
+            egoSay("Ein massiver Tresor.");
+        }
+
         verb   vOpen(int this, int that)
         {
             if (getState(this) >= 2) {
@@ -117,6 +122,11 @@ room Arbeitszimmer
             { 0, 0, "" },  // closed - no graphics, uses background image
             { 0, 0, "schublade_open.png" },     // open
         };
+
+        verb vLook(int this, int that)
+        {
+            egoSay("Eine einfache Schublade.");
+        }
 
         verb   vOpen(int this, int that)
         {

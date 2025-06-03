@@ -133,10 +133,10 @@ impl WebInterface {
 		self.objects.borrow_mut().remove(&id);
 	}
 
-	fn render_object(&self, id: u32, obj: &ObjectDef) -> Result<(), JsValue> {
-		self.objects.borrow_mut().insert(id, obj.clone());
-		Ok(())
-	}
+        fn render_object(&self, _interp: Interpreter, id: u32, obj: &ObjectDef) -> Result<(), JsValue> {
+                self.objects.borrow_mut().insert(id, obj.clone());
+                Ok(())
+        }
 
 	#[allow(dead_code)]
 	fn get_background(&self) -> Option<String> {
@@ -287,17 +287,42 @@ impl WebInterface {
 		}
 	}
 
-	fn render_object(&self, id: u32, obj: &ObjectDef) -> Result<(), JsValue> {
-		let element = match self.document.get_element_by_id(&format!("object-{}", id)) {
-			Some(el) => el,
-			None => {
-				let div = self.document.create_element("div")?;
-				div.set_attribute("id", &format!("object-{}", id))?;
-				div.set_attribute("class", "game-object")?;
-				self.room_container.append_child(&div)?;
-				div
-			},
-		};
+        fn render_object(&self, interp: Interpreter, id: u32, obj: &ObjectDef) -> Result<(), JsValue> {
+                let element = match self.document.get_element_by_id(&format!("object-{}", id)) {
+                        Some(el) => el,
+                        None => {
+                                let div = self.document.create_element("div")?;
+                                div.set_attribute("id", &format!("object-{}", id))?;
+                                div.set_attribute("class", "game-object")?;
+                                let name = obj.name.clone();
+                                let self_clone = self.clone();
+                                let mouse_enter = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
+                                        let _ = self_clone.display_message(&name);
+                                }) as Box<dyn FnMut(_)>);
+                                div.add_event_listener_with_callback("mouseenter", mouse_enter.as_ref().unchecked_ref())?;
+                                mouse_enter.forget();
+
+                                let self_clone = self.clone();
+                                let leave = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
+                                        let _ = self_clone.display_message("");
+                                }) as Box<dyn FnMut(_)>);
+                                div.add_event_listener_with_callback("mouseleave", leave.as_ref().unchecked_ref())?;
+                                leave.forget();
+
+                                let self_clone = self.clone();
+                                let interp_clone = interp.clone();
+                                let context_closure = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+                                        e.prevent_default();
+                                        let verbs = interp_clone.verbs_for_object(id);
+                                        let _ = self_clone.show_context_menu(id, e.client_x(), e.client_y(), verbs, interp_clone.clone());
+                                }) as Box<dyn FnMut(_)>);
+                                div.add_event_listener_with_callback("contextmenu", context_closure.as_ref().unchecked_ref())?;
+                                context_closure.forget();
+
+                                self.room_container.append_child(&div)?;
+                                div
+                        },
+                };
 
 		let mut style = format!(
 			"position: absolute; left: {}px; top: {}px; width: {}px; height: {}px;",
@@ -362,7 +387,7 @@ impl WebInterface {
 		Ok(())
 	}*/
 
-	fn display_message(&self, message: &str) -> Result<(), JsValue> {
+        fn display_message(&self, message: &str) -> Result<(), JsValue> {
 		// Create or update message area
 		let message_div = if let Some(existing) = self.document.get_element_by_id("game-message") {
 			existing
@@ -374,9 +399,62 @@ impl WebInterface {
 			div
 		};
 
-		message_div.set_inner_html(message);
-		Ok(())
-	}
+                message_div.set_inner_html(message);
+                Ok(())
+        }
+
+        fn show_context_menu(
+                &self,
+                obj_id: u32,
+                x: i32,
+                y: i32,
+                verbs: Vec<String>,
+                interp: Interpreter,
+        ) -> Result<(), JsValue> {
+                let menu = if let Some(existing) = self.document.get_element_by_id("context-menu") {
+                        existing
+                } else {
+                        let div = self.document.create_element("div")?;
+                        div.set_attribute("id", "context-menu")?;
+                        div.set_attribute(
+                                "style",
+                                "position:absolute; display:none; background:#222; color:#fff; border:1px solid #555; font-family:monospace; z-index:1000;",
+                        )?;
+                        self.document.body().unwrap().append_child(&div)?;
+                        let menu_clone = div.clone();
+                        let hide = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
+                                let _ = menu_clone.set_attribute("style", "display:none;");
+                        }) as Box<dyn FnMut(_)>);
+                        self.document.add_event_listener_with_callback("click", hide.as_ref().unchecked_ref())?;
+                        hide.forget();
+                        div
+                };
+
+                menu.set_inner_html("");
+                for verb in verbs {
+                        let item = self.document.create_element("div")?;
+                        item.set_inner_html(&verb);
+                        item.set_attribute("style", "padding:4px; cursor:pointer;")?;
+                        let menu_clone = menu.clone();
+                        let verb_clone = verb.clone();
+                        let interp_clone = interp.clone();
+                        let click = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
+                                interp_clone.run_verb(obj_id, &verb_clone, None);
+                                let _ = menu_clone.set_attribute("style", "display:none;");
+                        }) as Box<dyn FnMut(_)>);
+                        item.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
+                        click.forget();
+                        menu.append_child(&item)?;
+                }
+                menu.set_attribute(
+                        "style",
+                        &format!(
+                                "position:absolute; left:{}px; top:{}px; background:#222; color:#fff; border:1px solid #555; font-family:monospace; z-index:1000; display:block;",
+                                x, y
+                        ),
+                )?;
+                Ok(())
+        }
 }
 
 
@@ -454,8 +532,8 @@ pub struct Interpreter {
 	web_interface: WebInterface, // Web DOM interface
 	run_queue: Rc<RefCell<VecDeque<Task>>>,
 	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
-	last_room: RefCell<u32>,
-	last_objects: RefCell<HashMap<u32, Option<ObjectSnapshot>>>,
+        last_room: Rc<RefCell<u32>>,
+        last_objects: Rc<RefCell<HashMap<u32, Option<ObjectSnapshot>>>>,
 }
 
 impl Interpreter {
@@ -467,8 +545,8 @@ impl Interpreter {
 			web_interface: WebInterface::new().unwrap(),
 			run_queue: Rc::new(RefCell::new(VecDeque::new())),
 			declarations: Rc::new(RefCell::new(IndexMap::new())),
-			last_room: RefCell::new(0),
-			last_objects: RefCell::new(HashMap::new()),
+                        last_room: Rc::new(RefCell::new(0)),
+                        last_objects: Rc::new(RefCell::new(HashMap::new())),
 		};
 
 		// Execute the AST to build up all the declarations
@@ -708,8 +786,8 @@ impl Interpreter {
 
 		for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
 			if let Declaration::Object(obj) = decl {
-				if obj.room == room_id && obj.state > 0 {
-					self.web_interface.render_object(i as u32, obj)?;
+                                if obj.room == room_id && obj.state > 0 {
+                                        self.web_interface.render_object(self.clone(), i as u32, obj)?;
 					last_objects.insert(i as u32, Some(ObjectSnapshot::from(obj)));
 				} else {
 					last_objects.insert(i as u32, None);
@@ -719,17 +797,17 @@ impl Interpreter {
 		Ok(())
 	}
 
-	fn update_objects(&self, room_id: u32) -> Result<(), JsValue> {
-		let mut last_objects = self.last_objects.borrow_mut();
-		for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
-			if let Declaration::Object(obj) = decl {
+        fn update_objects(&self, room_id: u32) -> Result<(), JsValue> {
+                let mut last_objects = self.last_objects.borrow_mut();
+                for (i, (_, decl)) in self.declarations.borrow().iter().enumerate() {
+                        if let Declaration::Object(obj) = decl {
 				let id = i as u32;
 				let visible = obj.room == room_id && obj.state > 0;
 				match (last_objects.get(&id), visible) {
 					(Some(Some(snapshot)), true) => {
 						let current = ObjectSnapshot::from(obj);
 						if *snapshot != current {
-							self.web_interface.render_object(id, obj)?;
+                                                self.web_interface.render_object(self.clone(), id, obj)?;
 							last_objects.insert(id, Some(current));
 						}
 					},
@@ -738,14 +816,14 @@ impl Interpreter {
 						last_objects.insert(id, None);
 					},
 					(Some(None), true) => {
-						self.web_interface.render_object(id, obj)?;
+                                                self.web_interface.render_object(self.clone(), id, obj)?;
 						last_objects.insert(id, Some(ObjectSnapshot::from(obj)));
 					},
 					(Some(None), false) => {
 						// remain hidden
 					},
 					(None, true) => {
-						self.web_interface.render_object(id, obj)?;
+                                                self.web_interface.render_object(self.clone(), id, obj)?;
 						last_objects.insert(id, Some(ObjectSnapshot::from(obj)));
 					},
 					(None, false) => {
@@ -754,8 +832,74 @@ impl Interpreter {
 				}
 			}
 		}
-		Ok(())
-	}
+                Ok(())
+        }
+
+        pub fn verbs_for_object(&self, id: u32) -> Vec<String> {
+                let decls = self.declarations.borrow();
+                let (_, decl) = match decls.get_index(id as usize) {
+                        Some(v) => v,
+                        None => return Vec::new(),
+                };
+                let Declaration::Object(obj) = decl else { return Vec::new() };
+
+                let mut verbs: Vec<String> = obj.verbs.keys().cloned().collect();
+                for class_name in &obj.classes {
+                        if let Some(Declaration::Class(class_def)) = decls.get(class_name) {
+                                for k in class_def.verbs.keys() {
+                                        if !verbs.contains(k) {
+                                                verbs.push(k.clone());
+                                        }
+                                }
+                        }
+                }
+                verbs
+        }
+
+        fn find_verb_block(&self, id: u32, verb: &str) -> Option<Block> {
+                let decls = self.declarations.borrow();
+                let (_, decl) = decls.get_index(id as usize)?;
+                let Declaration::Object(obj) = decl else { return None };
+
+                if let Some(b) = obj.verbs.get(verb) {
+                        return Some(b.clone());
+                }
+                for class_name in &obj.classes {
+                        if let Some(Declaration::Class(class_def)) = decls.get(class_name) {
+                                if let Some(b) = class_def.verbs.get(verb) {
+                                        return Some(b.clone());
+                                }
+                        }
+                }
+                None
+        }
+
+        pub fn run_verb(&self, obj_id: u32, verb: &str, that: Option<u32>) -> bool {
+                let Some(block) = self.find_verb_block(obj_id, verb) else { return false };
+
+                let ctx = Ctx {
+                        vars: Rc::new(RefCell::new(HashMap::new())),
+                        delay: Rc::new(RefCell::new(0)),
+                        interpreter: self.clone(),
+                };
+                ctx.vars.borrow_mut().insert("this".into(), Value::Number(obj_id as i32));
+                ctx.vars.borrow_mut().insert(
+                        "that".into(),
+                        Value::Number(that.unwrap_or(0) as i32),
+                );
+                let key = format!("{}::{}", obj_id, verb);
+                let cloned_ctx = ctx.clone();
+                let task = Task {
+                        fut: Box::pin(async move {
+                                if let Err(err) = block.exec(&ctx).await {
+                                        error!("Error executing block {}: {:?}", key, err);
+                                }
+                        }),
+                        ctx: cloned_ctx,
+                };
+                self.run_queue.borrow_mut().push_back(task);
+                true
+        }
 
 	// --------------------------------------------------
 	// Run until no runnable tasks remain (original version for terminal use)

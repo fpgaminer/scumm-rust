@@ -92,8 +92,8 @@ room Arbeitszimmer
     {
         x = 0;
         y = 0;
-        w = 0;
-        h = 0;
+        w = 64;
+        h = 64;
         name = "Türgriff";
         state = 0;  // initially hidden
         states = {
@@ -141,8 +141,8 @@ room Arbeitszimmer
     {
         x = 0;
         y = 0;
-        w = 0;
-        h = 0;
+        w = 100;
+        h = 100;
         name = "Notiz";
         states = {
             { 1, 0, "notiz.png" }     // visible
@@ -199,10 +199,10 @@ room Arbeitszimmer
     /*** Schlüssel ***/
     object OBJ_SCHLUESSEL
     {
-        x = 0;
-        y = 0;
-        w = 0;
-        h = 0;
+        x = 1335;
+        y = 40;
+        w = 50;
+        h = 26;
         name = "Schlüssel";
         states = {
             { 0, 0, "schluessel.png" }  // visible

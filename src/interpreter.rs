@@ -120,6 +120,16 @@ impl WebInterface {
 		Ok(())
 	}
 
+	#[allow(dead_code)]
+	fn show_object_name(&self, _name: &str, _x: i32, _y: i32) -> Result<(), JsValue> {
+		Ok(())
+	}
+
+	#[allow(dead_code)]
+	fn hide_object_name(&self) -> Result<(), JsValue> {
+		Ok(())
+	}
+
 	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {
 		*self.room_background.borrow_mut() = image.map(|s| s.to_string());
 		Ok(())
@@ -301,15 +311,23 @@ impl WebInterface {
 				div.set_attribute("class", "game-object")?;
 				let name = obj.name.clone();
 				let self_clone = self.clone();
-				let mouse_enter = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
-					let _ = self_clone.display_message(&name);
+				let mouse_enter = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+					let _ = self_clone.show_object_name(&name, e.client_x(), e.client_y());
 				}) as Box<dyn FnMut(_)>);
 				div.add_event_listener_with_callback("mouseenter", mouse_enter.as_ref().unchecked_ref())?;
 				mouse_enter.forget();
 
+				let name = obj.name.clone();
+				let self_clone = self.clone();
+				let mouse_move = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+					let _ = self_clone.show_object_name(&name, e.client_x(), e.client_y());
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("mousemove", mouse_move.as_ref().unchecked_ref())?;
+				mouse_move.forget();
+
 				let self_clone = self.clone();
 				let leave = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
-					let _ = self_clone.display_message("");
+					let _ = self_clone.hide_object_name();
 				}) as Box<dyn FnMut(_)>);
 				div.add_event_listener_with_callback("mouseleave", leave.as_ref().unchecked_ref())?;
 				leave.forget();
@@ -408,6 +426,29 @@ impl WebInterface {
 		};
 
 		message_div.set_inner_html(message);
+		Ok(())
+	}
+
+	fn show_object_name(&self, name: &str, x: i32, y: i32) -> Result<(), JsValue> {
+		let label = if let Some(existing) = self.document.get_element_by_id("object-name") {
+			existing
+		} else {
+			let div = self.document.create_element("div")?;
+			div.set_attribute("id", "object-name")?;
+			div.set_attribute("style", "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px;")?;
+			self.game_container.append_child(&div)?;
+			div
+		};
+
+		label.set_inner_html(name);
+		label.set_attribute("style", &format!("position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px; left:{}px; top:{}px; display:block;", x + 10, y + 10))?;
+		Ok(())
+	}
+
+	fn hide_object_name(&self) -> Result<(), JsValue> {
+		if let Some(label) = self.document.get_element_by_id("object-name") {
+			label.set_attribute("style", "display:none;")?;
+		}
 		Ok(())
 	}
 

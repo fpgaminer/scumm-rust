@@ -318,10 +318,11 @@ impl WebInterface {
 				let interp_clone = interp.clone();
 				let context_closure = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
 					e.prevent_default();
+					e.stop_propagation();
 					let verbs = interp_clone.verbs_for_object(id);
 					let _ = self_clone.show_context_menu(id, e.client_x(), e.client_y(), verbs, interp_clone.clone());
 				}) as Box<dyn FnMut(_)>);
-				div.add_event_listener_with_callback("contextmenu", context_closure.as_ref().unchecked_ref())?;
+				div.add_event_listener_with_callback("click", context_closure.as_ref().unchecked_ref())?;
 				context_closure.forget();
 
 				self.room_container.append_child(&div)?;

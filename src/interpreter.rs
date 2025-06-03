@@ -148,7 +148,7 @@ impl WebInterface {
 		let document = window.document().ok_or("Should have a document on window")?;
 
 		// Define container dimensions
-		let container_width = 640.0;
+		let container_width = 720.0;
 		let container_height = 480.0;
 
 		// Create main game container

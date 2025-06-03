@@ -24,10 +24,10 @@ room Arbeitszimmer
     /*** Tür ***/
     object ObjTuer
     {
-        x = 0;
-        y = 0;
-        w = 0;
-        h = 0;
+        x = 516;
+        y = 136;
+        w = 402;
+        h = 723;
         name = "Tür";
 
         verb vLook(int this, int that)
@@ -39,10 +39,10 @@ room Arbeitszimmer
     /*** Tresor ***/
     object ObjTresor
     {
-        x = 855;
-        y = 650;
-        w = 275;
-        h = 280;
+        x = 893;
+        y = 703;
+        w = 174;
+        h = 184;
         name = "Tresor";
         states = {
             { 0, 0, "tresor_closed.png" },  // state = 1
@@ -74,10 +74,10 @@ room Arbeitszimmer
     /*** Schreibtisch ***/
     object OBJ_SCHREIBTISCH
     {
-        x = 0;
-        y = 0;
-        w = 0;
-        h = 0;
+        x = 1;
+        y = 599;
+        w = 464;
+        h = 321;
         name = "Schreibtisch";
         verb vLook(int this, int that) { egoSay("Ein alter Holzschreibtisch."); }
     }
@@ -108,10 +108,10 @@ room Arbeitszimmer
     /*** Schublade ***/
     object OBJ_SCHUBLADE
     {
-        x = 0;
-        y = 0;
-        w = 0;
-        h = 0;
+        x = 228;
+        y = 681;
+        w = 148;
+        h = 70;
         name = "Schublade";
         states = {
             { 0, 0, "schublade_closed.png" },  // closed
@@ -150,10 +150,10 @@ room Arbeitszimmer
     /*** Bücherregal ***/
     object OBJ_BUECHERREGAL
     {
-        x = 0;
-        y = 0;
-        w = 0;
-        h = 0;
+        x = 1049;
+        y = 108;
+        w = 394;
+        h = 782;
         name = "Bücherregal";
         verb vLook(int this, int that) {
             egoSay("Viele Bücher in verschiedenen Farben.");
@@ -163,10 +163,10 @@ room Arbeitszimmer
     /*** Rotes Buch ***/
     object OBJ_ROTES_BUCH
     {
-        x = 0;
-        y = 0;
-        w = 0;
-        h = 0;
+        x = 1335;
+        y = 355;
+        w = 26;
+        h = 126;
         name = "Rotes Buch";
         states = {
             { 0, 0, "rotes_buch.png" },  // visible

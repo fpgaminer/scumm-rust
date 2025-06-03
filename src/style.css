@@ -112,6 +112,7 @@ button:focus-visible {
 
 .game-object {
   transition: transform 0.2s ease-in-out;
+  border: 1px solid red;
 }
 
 .game-object:hover {

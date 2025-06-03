@@ -45,7 +45,7 @@ room Arbeitszimmer
         h = 184;
         name = "Tresor";
         states = {
-            { 0, 0, "tresor_closed.png" },  // state = 1
+            { 0, 0, "" },                   // state = 1
             { 0, 0, "tresor_code.png" },    // state = 2
             { 0, 0, "tresor_open.png" },    // state = 3
         };
@@ -114,7 +114,7 @@ room Arbeitszimmer
         h = 70;
         name = "Schublade";
         states = {
-            { 0, 0, "schublade_closed.png" },  // closed
+            { 0, 0, "" },  // closed - no graphics, uses background image
             { 0, 0, "schublade_open.png" },     // open
         };
 

@@ -330,7 +330,9 @@ impl WebInterface {
 		);
 		if obj.state > 0 {
 			if let Some(img) = obj.states.get(obj.state as usize - 1) {
-				style.push_str(&format!(" background: url('{}') no-repeat; background-size: contain;", img));
+				if !img.is_empty() {
+					style.push_str(&format!(" background: url('{}') no-repeat; background-size: contain;", img));
+				}
 			}
 		}
 		element.set_attribute("style", &style)?;

@@ -111,13 +111,17 @@ button:focus-visible {
 }
 
 .game-object {
-  transition: transform 0.2s ease-in-out;
-  border: 1px solid red;
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+  border: 1px solid transparent; /* Always have a border to prevent size changes */
 }
 
 .game-object:hover {
-  transform: scale(1.1);
-  border-color: #fff !important;
+  /* Subtle highlight for objects with graphics */
+  filter: brightness(1.2) !important;
+  /* Semi-transparent overlay that works for all objects */
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
 }
 
 /* Message display styles */

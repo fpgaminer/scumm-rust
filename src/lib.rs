@@ -175,8 +175,16 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 					let x: i32 = ei.next()?.as_str().parse().ok()?;
 					let y: i32 = ei.next()?.as_str().parse().ok()?;
 					let img_pair = ei.next()?;
-					let raw = img_pair.as_str();
-					let image = raw[1..raw.len() - 1].to_string();
+					let image = match img_pair.as_rule() {
+						Rule::string => {
+							let raw = img_pair.as_str();
+							raw[1..raw.len() - 1].to_string()
+						},
+						Rule::empty_string => {
+							String::new() // Empty string for no graphics
+						},
+						_ => return None,
+					};
 					states.push(StateEntry { x, y, image });
 				}
 				Some(Statement::States(states))
@@ -1026,6 +1034,26 @@ script S() {
 		let interp = interpreter::Interpreter::new(&ast);
 		let states = interp.with_object_by_name("OBJ", |o| o.states.clone()).expect("object missing");
 		assert_eq!(states, vec!["a.png".to_string(), "b.png".to_string()]);
+	}
+
+	#[test]
+	fn object_states_with_empty_strings() {
+		let src = r#"object OBJ {
+    states = { { 0, 0, "" }, { 0, 0, "visible.png" } };
+}"#;
+		let ast = parse_ok(src);
+		if let TopLevel::Object(obj) = &ast[0] {
+			assert_eq!(obj.body.statements.len(), 1);
+			if let Statement::States(entries) = &obj.body.statements[0] {
+				assert_eq!(entries.len(), 2);
+				assert_eq!(entries[0].image, ""); // Empty string for no graphics
+				assert_eq!(entries[1].image, "visible.png");
+			} else {
+				panic!("expected states statement");
+			}
+		} else {
+			panic!("expected object");
+		}
 	}
 
 	#[test]

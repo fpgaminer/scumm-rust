@@ -53,6 +53,7 @@ param_list  =  { "(" ~ (param ~ ("," ~ param)*)? ~ ")" }
 param       =  { identifier ~ identifier }
 
 states_array = { "{" ~ state_entry* ~ "}" }
-state_entry  = { "{" ~ number ~ "," ~ number ~ "," ~ string ~ "}" ~ ","? }
+state_entry  = { "{" ~ number ~ "," ~ number ~ "," ~ (string | empty_string) ~ "}" ~ ","? }
+empty_string = { "\"\"" }
 
 class_array  = { "{" ~ identifier ~ ("," ~ identifier)* ~ "}" }

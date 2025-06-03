@@ -157,9 +157,11 @@ States control object visibility and graphics:
 states = {
     { x_offset, y_offset, "image1.png" },  // State 1
     { x_offset, y_offset, "image2.png" },  // State 2
+    { x_offset, y_offset, "" },            // State 3 - interactive but no graphics
 };
 ```
 State 0 means the object is invisible and non-interactive.
+Using an empty string `""` for the image makes the object interactive and visible but renders without any state-specific graphics.
 
 ### Verb Definitions
 Verbs define how objects respond to player interactions. All verbs take two parameters:

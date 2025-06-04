@@ -104,6 +104,7 @@ pub struct Ctx {
 struct WebInterface {
 	room_background: Rc<RefCell<Option<String>>>,
 	objects: Rc<RefCell<HashMap<u32, ObjectDef>>>,
+	inventory: Rc<RefCell<HashSet<u32>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -112,6 +113,7 @@ impl WebInterface {
 		Ok(WebInterface {
 			room_background: Rc::new(RefCell::new(None)),
 			objects: Rc::new(RefCell::new(HashMap::new())),
+			inventory: Rc::new(RefCell::new(HashSet::new())),
 		})
 	}
 
@@ -148,6 +150,20 @@ impl WebInterface {
 		Ok(())
 	}
 
+	fn set_inventory(&self, items: &HashSet<u32>) {
+		*self.inventory.borrow_mut() = items.clone();
+	}
+
+	#[allow(dead_code)]
+	fn get_inventory(&self) -> HashSet<u32> {
+		self.inventory.borrow().clone()
+	}
+
+	fn update_inventory(&self, _interp: Interpreter, items: &HashSet<u32>) -> Result<(), JsValue> {
+		self.set_inventory(items);
+		Ok(())
+	}
+
 	#[allow(dead_code)]
 	fn get_background(&self) -> Option<String> {
 		self.room_background.borrow().clone()
@@ -165,6 +181,7 @@ struct WebInterface {
 	document: Document,
 	game_container: Element,
 	room_container: Element,
+	inventory_container: Element,
 	container_width: f64,
 	container_height: f64,
 	current_room_image: Rc<RefCell<Option<String>>>,
@@ -203,17 +220,30 @@ impl WebInterface {
 
 		game_container.append_child(&room_container)?;
 
+		let inventory_container = document.create_element("div")?;
+		inventory_container.set_attribute("id", "inventory-container")?;
+		inventory_container.set_attribute(
+			"style",
+			&format!(
+				"width: {}px; min-height: 40px; margin: 4px auto; display: flex; gap: 4px; background: #222; padding: 4px; border: 1px solid #666; box-sizing: border-box;",
+				container_width
+			),
+		)?;
+
 		// Append to body or app div
 		if let Some(app) = document.get_element_by_id("app") {
 			app.append_child(&game_container)?;
+			app.append_child(&inventory_container)?;
 		} else {
 			document.body().unwrap().append_child(&game_container)?;
+			document.body().unwrap().append_child(&inventory_container)?;
 		}
 
 		let web_interface = WebInterface {
 			document,
 			game_container,
 			room_container,
+			inventory_container,
 			container_width,
 			container_height,
 			current_room_image: Rc::new(RefCell::new(None)),
@@ -507,6 +537,36 @@ impl WebInterface {
 		)?;
 		Ok(())
 	}
+
+	fn update_inventory(&self, interp: Interpreter, items: &HashSet<u32>) -> Result<(), JsValue> {
+		while let Some(child) = self.inventory_container.first_child() {
+			let _ = self.inventory_container.remove_child(&child);
+		}
+		for id in items {
+			if let Some(obj) = interp.with_object_by_id(*id, |o| o.clone()) {
+				let div = self.document.create_element("div")?;
+				div.set_attribute("class", "inventory-item")?;
+				let mut style = "width:32px;height:32px;margin:2px;border:1px solid #555;background:#111;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;".to_string();
+				if obj.state > 0 {
+					if let Some(img) = obj.states.get(obj.state as usize - 1) {
+						if !img.is_empty() {
+							style.push_str(&format!(" background:url('{}') no-repeat center/contain;", img));
+							div.set_attribute("title", &obj.name)?;
+						} else {
+							div.set_inner_html(&obj.name);
+						}
+					} else {
+						div.set_inner_html(&obj.name);
+					}
+				} else {
+					div.set_inner_html(&obj.name);
+				}
+				div.set_attribute("style", &style)?;
+				self.inventory_container.append_child(&div)?;
+			}
+		}
+		Ok(())
+	}
 }
 
 
@@ -586,6 +646,7 @@ pub struct Interpreter {
 	pub declarations: Rc<RefCell<IndexMap<String, Declaration>>>,
 	last_room: Rc<RefCell<u32>>,
 	last_objects: Rc<RefCell<HashMap<u32, Option<ObjectSnapshot>>>>,
+	last_inventory: Rc<RefCell<HashSet<u32>>>,
 }
 
 impl Interpreter {
@@ -599,6 +660,7 @@ impl Interpreter {
 			declarations: Rc::new(RefCell::new(IndexMap::new())),
 			last_room: Rc::new(RefCell::new(0)),
 			last_objects: Rc::new(RefCell::new(HashMap::new())),
+			last_inventory: Rc::new(RefCell::new(HashSet::new())),
 		};
 
 		// Execute the AST to build up all the declarations
@@ -825,8 +887,10 @@ impl Interpreter {
 		} else {
 			self.update_objects(room_id)?;
 		}
+		self.update_inventory()?;
 		Ok(())
 	}
+
 
 	fn render_room(&self, room_id: u32) -> Result<(), JsValue> {
 		self.web_interface.clear_room();
@@ -883,6 +947,15 @@ impl Interpreter {
 					},
 				}
 			}
+		}
+		Ok(())
+	}
+
+	fn update_inventory(&self) -> Result<(), JsValue> {
+		let items = self.world.borrow().inventory.clone();
+		if items != *self.last_inventory.borrow() {
+			self.web_interface.update_inventory(self.clone(), &items)?;
+			*self.last_inventory.borrow_mut() = items;
 		}
 		Ok(())
 	}
@@ -1355,11 +1428,8 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 				if let Some(obj) = args.first() {
 					let id = ctx.interpreter.to_id(obj);
 					ctx.interpreter.world.borrow_mut().inventory.insert(id);
-
-					// Log and potentially update inventory display
+					ctx.interpreter.with_object_by_id_mut(id, |o| o.room = 0);
 					debug!("[inventory] added object {id}");
-
-					// Future enhancement: update visual inventory display
 				}
 				Null
 			}
@@ -1369,9 +1439,14 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 
 	builtins.insert(
 		"pickupObject".into(),
-		builtin_async(|_args, _ctx| {
+		builtin_async(|args, ctx| {
 			async move {
-				debug!("pickupObject called – this is a stub!");
+				if let Some(obj) = args.first() {
+					let id = ctx.interpreter.to_id(obj);
+					ctx.interpreter.world.borrow_mut().inventory.insert(id);
+					ctx.interpreter.with_object_by_id_mut(id, |o| o.room = 0);
+					debug!("[inventory] picked up object {id}");
+				}
 				Null
 			}
 			.boxed_local()
@@ -1545,6 +1620,29 @@ mod tests {
 		let src = "object O {}\nscript main() {\n    addToInventory(O);\n    bool has = objectInHand(O);\n}";
 		let vars = run_script(src);
 		assert_eq!(vars.get("has"), Some(&Value::Bool(true)));
+	}
+
+	#[test]
+	fn pickup_moves_object_to_inventory() {
+		let src = r#"room R {
+    object O { state = 1; }
+}
+
+script main() { pickupObject(O); }"#;
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+
+		for _ in 0..32 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+
+		let obj_id = interp.declarations.borrow().get_index_of("O").unwrap() as u32;
+		assert!(interp.world.borrow().inventory.contains(&obj_id));
+		let room = interp.with_object_by_id(obj_id, |o| o.room).unwrap();
+		assert_eq!(room, 0);
 	}
 
 	#[test]

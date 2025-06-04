@@ -555,6 +555,30 @@ impl WebInterface {
 				}
 				div.set_attribute("style", &style)?;
 
+				// Show object name when hovering
+				let name = obj.name.clone();
+				let self_clone = self.clone();
+				let mouse_enter = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+					let _ = self_clone.show_object_name(&name, e.client_x(), e.client_y());
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("mouseenter", mouse_enter.as_ref().unchecked_ref())?;
+				mouse_enter.forget();
+
+				let name = obj.name.clone();
+				let self_clone = self.clone();
+				let mouse_move = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+					let _ = self_clone.show_object_name(&name, e.client_x(), e.client_y());
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("mousemove", mouse_move.as_ref().unchecked_ref())?;
+				mouse_move.forget();
+
+				let self_clone = self.clone();
+				let leave = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
+					let _ = self_clone.hide_object_name();
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("mouseleave", leave.as_ref().unchecked_ref())?;
+				leave.forget();
+
 				// Allow interacting with inventory objects
 				let self_clone = self.clone();
 				let interp_clone = interp.clone();

@@ -512,7 +512,8 @@ impl WebInterface {
 		menu.set_inner_html("");
 		for verb in verbs {
 			let item = self.document.create_element("div")?;
-			item.set_inner_html(&verb);
+			let display = scumm_verb_to_user(&verb);
+			item.set_inner_html(&display);
 			item.set_attribute("class", "menu-item")?;
 			let menu_clone = menu.clone();
 			let verb_clone = verb.clone();
@@ -1547,6 +1548,23 @@ fn user_verb_to_scumm(cmd: &str) -> &'static str {
 		"take" | "get" | "pickup" => "vPickUp",
 		_ => "",
 	}
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scumm_verb_to_user(verb: &str) -> String {
+	let trimmed = verb.strip_prefix('v').unwrap_or(verb);
+	let mut out = String::new();
+	for (i, ch) in trimmed.chars().enumerate() {
+		if i == 0 {
+			out.extend(ch.to_uppercase());
+		} else if ch.is_uppercase() {
+			out.push(' ');
+			out.extend(ch.to_lowercase());
+		} else {
+			out.push(ch);
+		}
+	}
+	out
 }
 
 

@@ -1652,6 +1652,59 @@ mod tests {
 	}
 
 	#[test]
+	fn if_elseif_chain_executes_correct_branch() {
+		let src = r#"object Safe { state = 2; }
+script main() {
+    string msg = "";
+    if (getState(Safe) == 1 && 0 == 1) {
+        msg = "first";
+    } else if (getState(Safe) == 1) {
+        msg = "second";
+    } else if (getState(Safe) == 2) {
+        msg = "third";
+    }
+}"#;
+		let vars = run_script(src);
+		assert_eq!(vars.get("msg"), Some(&Value::Str("third".to_string())));
+	}
+
+	#[test]
+	fn verb_uses_correct_else_if_branch() {
+		let src = r#"object Key {}
+object Safe {
+    state = 2;
+    verb vUse(int this, int that) {
+        if (getState(this) == 1 && that == Key) {
+            setState(this, 5);
+        } else if (getState(this) == 1) {
+            setState(this, 4);
+        } else if (getState(this) == 2) {
+            setState(this, 3);
+        }
+    }
+}
+script main() {}
+"#;
+
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+
+		let safe_id = interp.declarations.borrow().get_index_of("Safe").unwrap() as u32;
+		let key_id = interp.declarations.borrow().get_index_of("Key").unwrap() as u32;
+
+		interp.run_verb(safe_id, "vUse", Some(key_id));
+		for _ in 0..32 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+
+		let state = interp.with_object_by_id(safe_id, |o| o.state).unwrap();
+		assert_eq!(state, 3);
+	}
+
+	#[test]
 	fn builtin_setstate_getstate() {
 		let src = "object O { state = 0; }\nscript main() {\n    int before = getState(O);\n    setState(O, 2);\n    int after = getState(O);\n}";
 		let vars = run_script(src);

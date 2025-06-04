@@ -82,7 +82,15 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let mut inner = pair.into_inner();
 			let condition = parse_expression(inner.next()?);
 			let then_block = parse_block(inner.next()?);
-			let else_block = inner.next().map(parse_block);
+			let else_block = inner.next().map(|p| {
+				if p.as_rule() == Rule::if_stmt {
+					// else if: parse as a nested if statement wrapped in a block
+					let stmt = parse_statement(p).expect("nested if");
+					Block { statements: vec![stmt] }
+				} else {
+					parse_block(p)
+				}
+			});
 			Some(Statement::If(IfStatement {
 				condition,
 				then_block,

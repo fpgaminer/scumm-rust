@@ -153,7 +153,7 @@ room Arbeitszimmer
         verb vRead(int this, int that)
         {
             egoSay("Die Notiz sagt: ‘Der Schlüssel steckt im ROTEN Buch.’");
-            setObjectOwner(OBJ_ROTES_BUCH, Arbeitszimmer);   // move book to room so it can be found
+            setState(OBJ_ROTES_BUCH, 1);  // make red book interactable 
         }
     }
 
@@ -179,8 +179,8 @@ room Arbeitszimmer
         h = 126;
         name = "Rotes Buch";
         states = {
-            { 0, 0, "rotes_buch.png" },  // visible
-            { 0, 0, "rotes_buch_open.png" },  // open
+            { 0, 0, "" },  // visible
+            { 0, 0, "" },  // open
         };
         state = 0;  // initially hidden; book is visible in background image but not interactable
 

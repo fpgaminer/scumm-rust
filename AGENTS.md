@@ -1,6 +1,7 @@
 Before finishing your work, please ensure that the code passes:
 * `cargo +nightly fmt --all -- --check`
 * `cargo check --all-features`
+* `cargo check --target wasm32-unknown-unknown --all-features`
 * `cargo test --all-features`
 * `cargo clippy --all-features -- -D warnings`
 

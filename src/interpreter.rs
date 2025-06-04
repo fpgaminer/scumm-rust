@@ -1,7 +1,6 @@
 use std::{
 	cell::RefCell,
 	collections::{HashMap, HashSet, VecDeque},
-	io::{self, Write},
 	pin::Pin,
 	rc::Rc,
 };
@@ -877,25 +876,6 @@ impl Interpreter {
 	}
 
 	// --------------------------------------------------
-	// Web interface initialization
-	// --------------------------------------------------
-	pub fn init_web_interface(&self) -> Result<(), JsValue> {
-		// Create divs for all objects in the current room
-		/*for (id, def) in &*self.objects {
-			if def.room == self.world.borrow().current_room {
-				let object_div = self.web_interface.create_object_div(def, def.room)?;
-				self.web_interface.room_container.append_child(&object_div)?;
-
-				// Hide objects that are initially not in room (initialRoom 0)
-				if def.room == 0 {
-					self.web_interface.hide_object(*id)?;
-				}
-			}
-		}*/
-		Ok(())
-	}
-
-	// --------------------------------------------------
 	// Script spawning helpers
 	// --------------------------------------------------
 	fn spawn_script_value(&self, v: Value) {
@@ -982,8 +962,6 @@ impl Interpreter {
 			self.world.borrow_mut().current_room = 1;
 		}
 
-		debug!("Ticking interpreter with {} tasks", self.run_queue.borrow().len());
-
 		//---------------------------------------------------------------
 		// Run each runnable task *once* (co-operative multitasking)
 		//---------------------------------------------------------------
@@ -1012,8 +990,6 @@ impl Interpreter {
 				},
 			}
 		}
-
-		debug!("Interpreter finished executing scripts");
 
 		// Update DOM after script execution
 		if let Err(e) = self.sync_web() {
@@ -1219,125 +1195,6 @@ impl Interpreter {
 		self.run_queue.borrow_mut().push_back(task);
 		true
 	}
-
-	// --------------------------------------------------
-	// Run until no runnable tasks remain (original version for terminal use)
-	// --------------------------------------------------
-	/*pub fn run(&mut self) {
-		// The entry script may have changed the room already
-		if self.world.current_room == 0 {
-			self.world.current_room = 1;
-		}
-
-		loop {
-			//---------------------------------------------------------------
-			// 1) run each runnable task *once* (co-operative multitasking)
-			//---------------------------------------------------------------
-			let mut n = self.tasks.len();
-			while n > 0 {
-				let mut task = self.tasks.pop_front().unwrap();
-				n -= 1;
-
-				if task.delay > 0 {
-					task.delay -= 1;
-					self.tasks.push_back(task);
-					continue;
-				}
-
-				let stmt_ref = match task.next() {
-					Some(s) => s,
-					None => continue,
-				};
-				let act = self.exec_stmt(stmt_ref.clone(), &mut task);
-				task.ip += 1;
-				if let Action::Splice { at, items } = act {
-					for (i, s) in items.into_iter().enumerate() {
-						task.stmts.insert(at + i, s.clone());
-					}
-				}
-				if task.ip < task.stmts.len() {
-					self.tasks.push_back(task);
-				}
-			}
-
-			//---------------------------------------------------------------
-			// 2) if no script produced output this tick, ask the player
-			//---------------------------------------------------------------
-			self.describe_room();
-			let Some(line) = read_player_command() else { break };
-			if line.is_empty() {
-				continue;
-			}
-			if line == "quit" {
-				info!("Bye!");
-				break;
-			}
-			if line == "inventory" {
-				if self.world.inventory.is_empty() {
-					info!("Your pockets are empty.");
-				} else {
-					info!("You are carrying:");
-					for id in &self.world.inventory {
-						if let Some(def) = self.objects.get(id) {
-							info!(" – {}", def.name);
-						}
-					}
-				}
-				continue;
-			}
-			let words: Vec<&str> = line.split_whitespace().collect();
-			if words.is_empty() {
-				continue;
-			}
-
-			// single-verb commands ----------------------------------------
-			let verb_word = words[0];
-			let verb_name = user_verb_to_scumm(verb_word);
-			if verb_name.is_empty() {
-				println!("I don’t understand.");
-				continue;
-			}
-
-			// pick <obj> or look <obj> etc.  “use key on door” -------------
-			let rest = &words[1..];
-			if rest.is_empty() {
-				println!("{} what?", verb_word);
-				continue;
-			}
-
-			// detect “on/with” to support 2-object USE
-			let split_at = rest.iter().position(|w| *w == "on" || *w == "with");
-			let (obj_words, tgt_words) = match split_at {
-				Some(pos) => (&rest[..pos], &rest[pos + 1..]),
-				None => (rest, &[][..]),
-			};
-			let obj_name = obj_words.join(" ");
-			let obj_id = *self.object_names.get(&obj_name).unwrap_or(&0);
-			if obj_id == 0 {
-				println!("There is no '{}' here.", obj_name);
-				continue;
-			}
-			let tgt_id = if !tgt_words.is_empty() {
-				let name = tgt_words.join(" ");
-				*self.object_names.get(&name).unwrap_or(&0)
-			} else {
-				0
-			};
-
-			// finally: run the verb ---------------------------------------
-			if tgt_id != 0 {
-				// try the first object (obj_id) first …
-				if !self.run_verb(obj_id, verb_name, Some(tgt_id)) {
-					// … fallback to the second if the first has no such verb
-					if !self.run_verb(tgt_id, verb_name, Some(obj_id)) {
-						println!("{} {} on {}? I don’t know how to do that.", verb_word, obj_name, tgt_words.join(" "));
-					}
-				}
-			} else {
-				self.run_verb(obj_id, verb_name, None);
-			}
-		}
-	}*/
 }
 
 
@@ -1385,7 +1242,6 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 		"breakScript".into(),
 		builtin_async(|_, _ctx| {
 			async move {
-				debug!("Break script called!");
 				yield_now().await; // stop right here, resume next tick
 				Value::Null
 			}
@@ -1726,20 +1582,6 @@ pub fn yield_now() -> YieldNow {
 // Convenience wrapper
 // ---------------------------------------------------------------------------
 
-
-#[allow(dead_code)]
-fn user_verb_to_scumm(cmd: &str) -> &'static str {
-	match cmd {
-		"look" | "examine" => "vLook",
-		"open" => "vOpen",
-		"close" => "vClose",
-		"use" => "vUse",
-		"read" => "vRead",
-		"take" | "get" | "pickup" => "vPickUp",
-		_ => "",
-	}
-}
-
 #[cfg(target_arch = "wasm32")]
 fn scumm_verb_to_user(verb: &str) -> String {
 	let trimmed = verb.strip_prefix('v').unwrap_or(verb);
@@ -1757,18 +1599,6 @@ fn scumm_verb_to_user(verb: &str) -> String {
 	out
 }
 
-
-#[allow(dead_code)]
-fn read_player_command() -> Option<String> {
-	print!(">> ");
-	io::stdout().flush().ok()?;
-	let mut buf = String::new();
-	if io::stdin().read_line(&mut buf).is_ok() {
-		Some(buf.trim().to_lowercase())
-	} else {
-		None
-	}
-}
 
 #[cfg(test)]
 mod tests {

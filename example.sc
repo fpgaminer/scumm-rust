@@ -65,7 +65,7 @@ room Arbeitszimmer
         }
         verb   vUse(int this, int that)
         {
-            if (getState(this) == 1 && objectInHand(ObjSchluessel)) {
+            if (getState(this) == 1 && that == OBJ_SCHLUESSEL) {
                 setState(this,2);          // unlock safe
                 startScript( AskCode );
             } else if (getState(this) == 1) {

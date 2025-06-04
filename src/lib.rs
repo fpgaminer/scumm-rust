@@ -509,12 +509,6 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 	// Run the interpreter with web interface
 	let interpreter = interpreter::Interpreter::new(&ast_nodes);
 
-	// Initialize web interface
-	if let Err(e) = interpreter.init_web_interface() {
-		error!("Failed to initialize web interface: {:?}", e);
-		return Err(anyhow::anyhow!("Web interface initialization failed"));
-	}
-
 	let tick_closure = {
 		Closure::<dyn FnMut()>::new(move || {
 			interpreter.tick_web();

@@ -161,3 +161,28 @@ button:focus-visible {
   font-size: 12px;
   color: #fff;
 }
+
+/* Verb/context menu styles */
+#context-menu {
+  background: #222;
+  color: #fff;
+  border: 1px solid #555;
+  font-family: monospace;
+  position: absolute;
+  z-index: 1000;
+  display: none;
+  padding: 4px 0;
+  border-radius: 4px;
+  min-width: 120px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+}
+
+#context-menu .menu-item {
+  padding: 4px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#context-menu .menu-item:hover {
+  background: #444;
+}

@@ -105,7 +105,7 @@ room Arbeitszimmer
         {
             if (that == ObjTuer) {
                 egoSay("Jetzt kann ich raus!");
-                startScript( S_EXIT_ROOM );
+                startRoom(Escaped);  // go to success screen
             }
         }
     }
@@ -212,6 +212,13 @@ room Arbeitszimmer
     }
 }
 
+
+room Escaped
+{
+    image = "room2.webp";  // Background image for success screen
+
+}
+
 /* ------------- Idle script to keep the game running ------------- */
 script Idle()
 {
@@ -238,21 +245,6 @@ script S_REVEAL_HANDLE()
 {
     animateObject(ObjTuergriff, 1);   // small bounce animation
     egoSay("Ein Türgriff! Genau was ich brauche.");
-}
-
-
-
-
-
-
-
-
-
-/* ------------- Exit script ---------------- */
-script S_EXIT_ROOM()
-{
-    killAllScriptsExceptCurrent();  // stop all other scripts, including the idle script
-    // TODO: Success screen
 }
 
 

@@ -441,7 +441,17 @@ impl WebInterface {
 		};
 
 		label.set_inner_html(name);
-		label.set_attribute("style", &format!("position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px; left:{}px; top:{}px; display:block;", x + 10, y + 10))?;
+		let rect = self.game_container.get_bounding_client_rect();
+		let adj_x = x as f64 - rect.left() + 10.0;
+		let adj_y = y as f64 - rect.top() + 10.0;
+		label.set_attribute(
+                        "style",
+                        &format!(
+                                "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px; left:{}px; top:{}px; display:block;",
+                                adj_x,
+                                adj_y
+                        ),
+                )?;
 		Ok(())
 	}
 

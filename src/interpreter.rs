@@ -515,7 +515,7 @@ impl WebInterface {
 		menu.set_inner_html("");
 		for verb in verbs {
 			let item = self.document.create_element("div")?;
-			item.set_inner_html(&verb);
+			item.set_inner_html(&display_verb_name(&verb));
 			item.set_attribute("style", "padding:4px; cursor:pointer;")?;
 			let menu_clone = menu.clone();
 			let verb_clone = verb.clone();
@@ -1555,6 +1555,20 @@ fn user_verb_to_scumm(cmd: &str) -> &'static str {
 		"read" => "vRead",
 		"take" | "get" | "pickup" => "vPickUp",
 		_ => "",
+	}
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn display_verb_name(verb: &str) -> String {
+	let trimmed = if verb.starts_with('v') && verb.chars().nth(1).is_some_and(|c| c.is_uppercase()) {
+		&verb[1..]
+	} else {
+		verb
+	};
+	let mut chars = trimmed.chars();
+	match chars.next() {
+		Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+		None => String::new(),
 	}
 }
 

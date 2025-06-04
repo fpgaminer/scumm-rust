@@ -105,6 +105,8 @@ struct WebInterface {
 	room_background: Rc<RefCell<Option<String>>>,
 	objects: Rc<RefCell<HashMap<u32, ObjectDef>>>,
 	inventory: Rc<RefCell<HashSet<u32>>>,
+	#[allow(dead_code)]
+	dragging_object: Rc<RefCell<Option<u32>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -114,6 +116,7 @@ impl WebInterface {
 			room_background: Rc::new(RefCell::new(None)),
 			objects: Rc::new(RefCell::new(HashMap::new())),
 			inventory: Rc::new(RefCell::new(HashSet::new())),
+			dragging_object: Rc::new(RefCell::new(None)),
 		})
 	}
 
@@ -129,6 +132,16 @@ impl WebInterface {
 
 	#[allow(dead_code)]
 	fn hide_object_name(&self) -> Result<(), JsValue> {
+		Ok(())
+	}
+
+	#[allow(dead_code)]
+	fn show_use_hint(&self, _text: &str, _x: i32, _y: i32) -> Result<(), JsValue> {
+		Ok(())
+	}
+
+	#[allow(dead_code)]
+	fn hide_use_hint(&self) -> Result<(), JsValue> {
 		Ok(())
 	}
 
@@ -187,6 +200,7 @@ struct WebInterface {
 	current_room_image: Rc<RefCell<Option<String>>>,
 	scale_x: Rc<RefCell<f64>>,
 	scale_y: Rc<RefCell<f64>>,
+	dragging_object: Rc<RefCell<Option<u32>>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -249,6 +263,7 @@ impl WebInterface {
 			current_room_image: Rc::new(RefCell::new(None)),
 			scale_x: Rc::new(RefCell::new(1.0)),
 			scale_y: Rc::new(RefCell::new(1.0)),
+			dragging_object: Rc::new(RefCell::new(None)),
 		};
 
 		// Ensure the message box exists so it's visible immediately
@@ -373,6 +388,56 @@ impl WebInterface {
 				div.add_event_listener_with_callback("click", context_closure.as_ref().unchecked_ref())?;
 				context_closure.forget();
 
+				// Allow dropping inventory items onto this object
+				let over_self = self.clone();
+				let over_interp = interp.clone();
+				let over_id = id;
+				let over = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::DragEvent| {
+					if let Some(src) = *over_self.dragging_object.borrow() {
+						let src_has = over_interp.verbs_for_object(src).contains(&"vUse".to_string());
+						let tgt_has = over_interp.verbs_for_object(over_id).contains(&"vUse".to_string());
+						if src_has || tgt_has {
+							e.prevent_default();
+							if let (Some(src_name), Some(tgt_name)) = (
+								over_interp.with_object_by_id(src, |o| o.name.clone()),
+								over_interp.with_object_by_id(over_id, |o| o.name.clone()),
+							) {
+								let text = format!("Use {} on {}", src_name, tgt_name);
+								let _ = over_self.show_use_hint(&text, e.client_x(), e.client_y());
+							}
+						}
+					}
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("dragover", over.as_ref().unchecked_ref())?;
+				over.forget();
+
+				let leave_self = self.clone();
+				let leave = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::DragEvent| {
+					let _ = leave_self.hide_use_hint();
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("dragleave", leave.as_ref().unchecked_ref())?;
+				leave.forget();
+
+				let drop_self = self.clone();
+				let drop_interp = interp.clone();
+				let drop_id = id;
+				let drop = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::DragEvent| {
+					e.prevent_default();
+					if let Some(src) = *drop_self.dragging_object.borrow() {
+						let src_has = drop_interp.verbs_for_object(src).contains(&"vUse".to_string());
+						let tgt_has = drop_interp.verbs_for_object(drop_id).contains(&"vUse".to_string());
+						if src_has {
+							drop_interp.run_verb(src, "vUse", Some(drop_id));
+						}
+						if tgt_has {
+							drop_interp.run_verb(drop_id, "vUse", Some(src));
+						}
+					}
+					let _ = drop_self.hide_use_hint();
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("drop", drop.as_ref().unchecked_ref())?;
+				drop.forget();
+
 				self.room_container.append_child(&div)?;
 				div
 			},
@@ -492,6 +557,39 @@ impl WebInterface {
 		Ok(())
 	}
 
+	fn show_use_hint(&self, text: &str, x: i32, y: i32) -> Result<(), JsValue> {
+		let label = if let Some(existing) = self.document.get_element_by_id("use-hint") {
+			existing
+		} else {
+			let div = self.document.create_element("div")?;
+			div.set_attribute("id", "use-hint")?;
+			div.set_attribute("style", "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px;")?;
+			self.game_container.append_child(&div)?;
+			div
+		};
+
+		label.set_inner_html(text);
+		let rect = self.game_container.get_bounding_client_rect();
+		let adj_x = x as f64 - rect.left() + 10.0;
+		let adj_y = y as f64 - rect.top() + 10.0;
+		label.set_attribute(
+                        "style",
+                        &format!(
+                                "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px; left:{}px; top:{}px; display:block;",
+                                adj_x,
+                                adj_y
+                        ),
+                )?;
+		Ok(())
+	}
+
+	fn hide_use_hint(&self) -> Result<(), JsValue> {
+		if let Some(label) = self.document.get_element_by_id("use-hint") {
+			label.set_attribute("style", "display:none;")?;
+		}
+		Ok(())
+	}
+
 	fn show_context_menu(&self, obj_id: u32, x: i32, y: i32, verbs: Vec<String>, interp: Interpreter) -> Result<(), JsValue> {
 		let menu = if let Some(existing) = self.document.get_element_by_id("context-menu") {
 			existing
@@ -554,6 +652,24 @@ impl WebInterface {
 					div.set_inner_html(&obj.name);
 				}
 				div.set_attribute("style", &style)?;
+				div.set_attribute("draggable", "true")?;
+
+				// Drag start to initiate use
+				let drag_self = self.clone();
+				let drag_id = *id;
+				let dragstart = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::DragEvent| {
+					*drag_self.dragging_object.borrow_mut() = Some(drag_id);
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("dragstart", dragstart.as_ref().unchecked_ref())?;
+				dragstart.forget();
+
+				let drag_self = self.clone();
+				let dragend = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::DragEvent| {
+					*drag_self.dragging_object.borrow_mut() = None;
+					let _ = drag_self.hide_use_hint();
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("dragend", dragend.as_ref().unchecked_ref())?;
+				dragend.forget();
 
 				// Show object name when hovering
 				let name = obj.name.clone();
@@ -592,6 +708,56 @@ impl WebInterface {
 				}) as Box<dyn FnMut(_)>);
 				div.add_event_listener_with_callback("click", context_closure.as_ref().unchecked_ref())?;
 				context_closure.forget();
+
+				// Allow dropping other items onto this inventory item
+				let self_over = self.clone();
+				let interp_over = interp.clone();
+				let id_over = *id;
+				let over = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::DragEvent| {
+					if let Some(src) = *self_over.dragging_object.borrow() {
+						let src_has = interp_over.verbs_for_object(src).contains(&"vUse".to_string());
+						let tgt_has = interp_over.verbs_for_object(id_over).contains(&"vUse".to_string());
+						if src_has || tgt_has {
+							e.prevent_default();
+							if let (Some(src_name), Some(tgt_name)) = (
+								interp_over.with_object_by_id(src, |o| o.name.clone()),
+								interp_over.with_object_by_id(id_over, |o| o.name.clone()),
+							) {
+								let text = format!("Use {} on {}", src_name, tgt_name);
+								let _ = self_over.show_use_hint(&text, e.client_x(), e.client_y());
+							}
+						}
+					}
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("dragover", over.as_ref().unchecked_ref())?;
+				over.forget();
+
+				let self_leave = self.clone();
+				let leave = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::DragEvent| {
+					let _ = self_leave.hide_use_hint();
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("dragleave", leave.as_ref().unchecked_ref())?;
+				leave.forget();
+
+				let self_drop = self.clone();
+				let interp_drop = interp.clone();
+				let id_drop = *id;
+				let drop = wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::DragEvent| {
+					e.prevent_default();
+					if let Some(src) = *self_drop.dragging_object.borrow() {
+						let src_has = interp_drop.verbs_for_object(src).contains(&"vUse".to_string());
+						let tgt_has = interp_drop.verbs_for_object(id_drop).contains(&"vUse".to_string());
+						if src_has {
+							interp_drop.run_verb(src, "vUse", Some(id_drop));
+						}
+						if tgt_has {
+							interp_drop.run_verb(id_drop, "vUse", Some(src));
+						}
+					}
+					let _ = self_drop.hide_use_hint();
+				}) as Box<dyn FnMut(_)>);
+				div.add_event_listener_with_callback("drop", drop.as_ref().unchecked_ref())?;
+				drop.forget();
 
 				self.inventory_container.append_child(&div)?;
 			}

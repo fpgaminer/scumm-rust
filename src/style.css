@@ -136,6 +136,11 @@ button:focus-visible {
   pointer-events: none;
 }
 
+#use-hint {
+  font-size: 12px;
+  pointer-events: none;
+}
+
 #inventory-container {
   display: flex;
   gap: 4px;

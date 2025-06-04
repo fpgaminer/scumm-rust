@@ -498,10 +498,7 @@ impl WebInterface {
 		} else {
 			let div = self.document.create_element("div")?;
 			div.set_attribute("id", "context-menu")?;
-			div.set_attribute(
-				"style",
-				"position:absolute; display:none; background:#222; color:#fff; border:1px solid #555; font-family:monospace; z-index:1000;",
-			)?;
+			div.set_attribute("style", "position:absolute; display:none;")?;
 			self.document.body().unwrap().append_child(&div)?;
 			let menu_clone = div.clone();
 			let hide = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
@@ -516,7 +513,7 @@ impl WebInterface {
 		for verb in verbs {
 			let item = self.document.create_element("div")?;
 			item.set_inner_html(&verb);
-			item.set_attribute("style", "padding:4px; cursor:pointer;")?;
+			item.set_attribute("class", "menu-item")?;
 			let menu_clone = menu.clone();
 			let verb_clone = verb.clone();
 			let interp_clone = interp.clone();
@@ -528,13 +525,7 @@ impl WebInterface {
 			click.forget();
 			menu.append_child(&item)?;
 		}
-		menu.set_attribute(
-			"style",
-			&format!(
-				"position:absolute; left:{}px; top:{}px; background:#222; color:#fff; border:1px solid #555; font-family:monospace; z-index:1000; display:block;",
-				x, y
-			),
-		)?;
+		menu.set_attribute("style", &format!("position:absolute; left:{}px; top:{}px; display:block;", x, y))?;
 		Ok(())
 	}
 

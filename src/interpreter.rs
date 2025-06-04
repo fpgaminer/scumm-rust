@@ -590,6 +590,12 @@ impl WebInterface {
 	}
 
 	fn show_context_menu(&self, obj_id: u32, x: i32, y: i32, verbs: Vec<String>, interp: Interpreter) -> Result<(), JsValue> {
+		if verbs.is_empty() {
+			if let Some(menu) = self.document.get_element_by_id("context-menu") {
+				menu.set_attribute("style", "display:none;")?;
+			}
+			return Ok(());
+		}
 		let menu = if let Some(existing) = self.document.get_element_by_id("context-menu") {
 			existing
 		} else {

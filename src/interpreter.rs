@@ -233,7 +233,7 @@ impl WebInterface {
 			*self.current_room_image.borrow_mut() = Some(img.to_string());
 
 			// Load the image to get its natural dimensions
-			let image_element = web_sys::HtmlImageElement::new()?;
+			let image_element = HtmlImageElement::new()?;
 			let scale_x = self.scale_x.clone();
 			let scale_y = self.scale_y.clone();
 			let room_container = self.room_container.clone();

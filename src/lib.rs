@@ -58,14 +58,15 @@ where
 	F: Fn(Box<Expression>, O, Box<Expression>) -> Expression,
 {
 	let mut inner = pair.into_inner();
-	let mut expr = parse_expression(inner.next().unwrap());
-	while let Some(op_pair) = inner.next() {
+	let left = parse_expression(inner.next().unwrap());
+	if let Some(op_pair) = inner.next() {
 		let right_pair = inner.next().unwrap();
 		let op = map_op(op_pair.as_str());
 		let right_expr = parse_expression(right_pair);
-		expr = make_expr(Box::new(expr), op, Box::new(right_expr));
+		make_expr(Box::new(left), op, Box::new(right_expr))
+	} else {
+		left
 	}
-	expr
 }
 
 fn parse_room_block(pair: Pair<Rule>) -> Result<Block, String> {
@@ -171,28 +172,12 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 				left
 			}
 		},
-		Rule::logical_or => {
-			let mut inner = pair.into_inner();
-			let mut expr = parse_expression(inner.next().unwrap());
-
-			// Each remaining pair is another logical_and expression to OR with
-			for right_pair in inner {
-				let right_expr = parse_expression(right_pair);
-				expr = Expression::LogicalOr(Box::new(expr), Box::new(right_expr));
-			}
-			expr
-		},
-		Rule::logical_and => {
-			let mut inner = pair.into_inner();
-			let mut expr = parse_expression(inner.next().unwrap());
-
-			// Each remaining pair is another equality expression to AND with
-			for right_pair in inner {
-				let right_expr = parse_expression(right_pair);
-				expr = Expression::LogicalAnd(Box::new(expr), Box::new(right_expr));
-			}
-			expr
-		},
+		Rule::logical_or => parse_binary_expr(
+			pair,
+			|_| (), // operator has no enum, handled directly
+			|l, _, r| Expression::LogicalOr(l, r),
+		),
+		Rule::logical_and => parse_binary_expr(pair, |_| (), |l, _, r| Expression::LogicalAnd(l, r)),
 		Rule::equality => parse_binary_expr(
 			pair,
 			|op| match op {

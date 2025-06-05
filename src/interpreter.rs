@@ -1972,4 +1972,121 @@ script main() { startRoom(R); }
 		let new_state = interp.with_object_by_id(safe_id, |o| o.state).unwrap();
 		assert_eq!(new_state, 2, "inherited verb should have changed the state");
 	}
+
+	#[test]
+	fn wait_builtin_delays_execution() {
+		// step is changed **after** a two-tick pause – we check the intermediate
+		// states to be sure the delay is honoured.
+		let src = r#"
+			script main() {
+				int step = 0;
+				wait(2);      // should pause for 2 ticks
+				step = 1;
+			}
+		"#;
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+		let ctx = interp.run_queue.borrow().front().expect("no script spawned").ctx.clone();
+
+		// ── tick 1: script runs until wait() yields ─────────────────────────────
+		interp.tick_web();
+		assert_eq!(ctx.vars.borrow().get("step"), Some(&Value::Number(0)));
+
+		// ── tick 2: still waiting, variable unchanged ───────────────────────────
+		interp.tick_web();
+		assert_eq!(ctx.vars.borrow().get("step"), Some(&Value::Number(0)));
+
+		// ── tick 3: still waiting, variable unchanged ───────────────────────────
+		interp.tick_web();
+		assert_eq!(ctx.vars.borrow().get("step"), Some(&Value::Number(0)));
+
+		// ── tick 4: delay elapsed, assignment executes ──────────────────────────
+		interp.tick_web();
+		assert_eq!(ctx.vars.borrow().get("step"), Some(&Value::Number(1)));
+
+		// make sure the task is finished
+		for _ in 0..4 {
+			interp.tick_web();
+		}
+		assert!(interp.run_queue.borrow().is_empty());
+	}
+
+	#[test]
+	fn logical_or_short_circuits() {
+		// RHS must *not* execute – y should stay 0.
+		let vars = run_script(
+			r#"
+			script main() {
+				int x = 0;
+				int y = 0;
+				if ((x = 1) || (y = 2)) { }
+			}
+		"#,
+		);
+		assert_eq!(vars.get("x"), Some(&Value::Number(1)));
+		assert_eq!(vars.get("y"), Some(&Value::Number(0)));
+	}
+
+	#[test]
+	fn logical_and_short_circuits() {
+		// RHS must *not* execute because LHS is falsy (0).
+		let vars = run_script(
+			r#"
+			script main() {
+				int a = 0;
+				int b = 0;
+				if ((a = 0) && (b = 1)) { }
+			}
+		"#,
+		);
+		assert_eq!(vars.get("a"), Some(&Value::Number(0)));
+		assert_eq!(vars.get("b"), Some(&Value::Number(0)));
+	}
+
+	#[test]
+	fn object_verb_overrides_class() {
+		// Local verb should win over inherited one.
+		let src = r#"
+			class DoorOps {
+				verb vOpen(int this, int that) { setState(this, 2); }
+			}
+
+			object Safe {
+				state  = 1;
+				// three visible states so 1,2,3 are all valid
+				states = { {0,0,""}, {0,0,""}, {0,0,""} };
+				class  = {DoorOps};
+				verb vOpen(int this, int that) { setState(this, 3); }  // override
+			}
+		"#;
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+		let safe_id = interp.declarations.borrow().get_index_of("Safe").unwrap() as u32;
+
+		assert!(interp.run_verb(safe_id, "vOpen", None));
+		for _ in 0..16 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+		let new_state = interp.with_object_by_id(safe_id, |o| o.state).unwrap();
+		assert_eq!(new_state, 3, "object’s own verb should override the class one");
+	}
+
+	#[test]
+	fn comparison_and_divide_operators_work() {
+		let vars = run_script(
+			r#"
+			script main() {
+				bool good = 5 >= 4;
+				bool bad  = 3 < 2;
+				int  res  = 20 / 4;
+			}
+		"#,
+		);
+		assert_eq!(vars.get("good"), Some(&Value::Bool(true)));
+		assert_eq!(vars.get("bad"), Some(&Value::Bool(false)));
+		assert_eq!(vars.get("res"), Some(&Value::Number(5)));
+	}
 }

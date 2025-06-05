@@ -44,11 +44,11 @@ room Arbeitszimmer
         w = 174;
         h = 184;
         name = "Tresor";
-        states = {
-            { 0, 0, "" },                   // state = 1
-            { 0, 0, "tresor_code.png" },    // state = 2
-            { 0, 0, "tresor_open.png" },    // state = 3
-        };
+        states = [
+            [ 0, 0, "" ],                   // state = 1
+            [ 0, 0, "tresor_code.png" ],    // state = 2
+            [ 0, 0, "tresor_open.png" ],    // state = 3
+        ];
 
         verb vLook(int this, int that)
         {
@@ -96,11 +96,11 @@ room Arbeitszimmer
         h = 64;
         name = "Türgriff";
         state = 0;  // initially hidden
-        states = {
-            { 0, 0, "tuergriff.png" }  // visible, after safe opened
-        };
+        states = [
+            [ 0, 0, "tuergriff.png" ],  // visible, after safe opened
+        ];
 
-        class = { oClassPickup };  // can be picked up
+        class = [ oClassPickup ];  // can be picked up
         verb   vUse(int this, int that)
         {
             if (that == ObjTuer) {
@@ -118,10 +118,10 @@ room Arbeitszimmer
         w = 148;
         h = 70;
         name = "Schublade";
-        states = {
-            { 0, 0, "" },  // closed - no graphics, uses background image
-            { 0, 0, "schublade_open.png" },     // open
-        };
+        states = [
+            [ 0, 0, "" ],  // closed - no graphics, uses background image
+            [ 0, 0, "schublade_open.png" ],     // open
+        ];
 
         verb vLook(int this, int that)
         {
@@ -144,12 +144,12 @@ room Arbeitszimmer
         w = 100;
         h = 100;
         name = "Notiz";
-        states = {
-            { 1, 0, "notiz.png" }     // visible
-        };
+        states = [
+            [ 1, 0, "notiz.png" ]     // visible
+        ];
         state = 0;  // initially hidden
 
-        class = { oClassPickup };
+        class = [ oClassPickup ];
         verb vRead(int this, int that)
         {
             egoSay("Die Notiz sagt: ‘Der Schlüssel steckt im ROTEN Buch.’");
@@ -178,10 +178,10 @@ room Arbeitszimmer
         w = 26;
         h = 126;
         name = "Rotes Buch";
-        states = {
-            { 0, 0, "" },  // visible
-            { 0, 0, "" },  // open
-        };
+        states = [
+            [ 0, 0, "" ],  // visible
+            [ 0, 0, "" ],  // open
+        ];
         state = 0;  // initially hidden; book is visible in background image but not interactable
 
         verb vOpen(int this, int that)
@@ -204,11 +204,11 @@ room Arbeitszimmer
         w = 50;
         h = 26;
         name = "Schlüssel";
-        states = {
-            { 0, 0, "schluessel.png" }  // visible
-        };
+        states = [
+            [ 0, 0, "schluessel.png" ]  // visible
+        ];
         state = 0;  // initially hidden
-        class = { oClassPickup };
+        class = [ oClassPickup ];
     }
 }
 

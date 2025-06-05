@@ -541,7 +541,7 @@ mod tests {
 	#[test]
 	fn object_with_verbs() {
 		let src = r#"object OBJ {
-    class = {Cls};
+    class = [Cls];
     verb vOne();
     verb vTwo() {
         call();
@@ -923,10 +923,10 @@ script S() {
 	#[test]
 	fn object_states_array_parse() {
 		let src = r#"object OBJ {
-    states = {
-        { 1, 2, "one.png" },
-        { 3, 4, "two.png" },
-    };
+    states = [
+        [ 1, 2, "one.png" ],
+        [ 3, 4, "two.png" ],
+    ];
 }"#;
 		let ast = parse_ok(src);
 		let TopLevel::Object(obj) = &ast[0] else { panic!("expected object") };
@@ -970,7 +970,7 @@ script S() {
 	#[test]
 	fn interpreter_object_states() {
 		let src = r#"object OBJ {
-    states = { { 0, 0, "a.png" }, { 0, 0, "b.png" } };
+    states = [ [ 0, 0, "a.png" ], [ 0, 0, "b.png" ] ];
 }"#;
 		let ast = parse_ok(src);
 		let interp = interpreter::Interpreter::new(&ast);
@@ -981,7 +981,7 @@ script S() {
 	#[test]
 	fn object_states_with_empty_strings() {
 		let src = r#"object OBJ {
-    states = { { 0, 0, "" }, { 0, 0, "visible.png" } };
+    states = [ [ 0, 0, "" ], [ 0, 0, "visible.png" ] ];
 }"#;
 		let ast = parse_ok(src);
 		let TopLevel::Object(obj) = &ast[0] else { panic!() };
@@ -1023,7 +1023,7 @@ script S() {
 		// Test that "class = {ClassName}" in an object is parsed as a ClassAssignment
 		// not as a class definition
 		let src = r#"object TestObj {
-    class = {SomeClass};
+    class = [SomeClass];
     verb test();
 }"#;
 		let ast = parse_ok(src);
@@ -1056,7 +1056,7 @@ script S() {
 }
 
 object TestObj {
-    class = {BaseClass};
+    class = [BaseClass];
 }"#;
 		let ast = parse_ok(src);
 
@@ -1105,7 +1105,7 @@ object TestObj {
 	fn class_assignment_multiple_classes() {
 		// Test that multiple classes can be assigned to an object
 		let src = r#"object TestObj {
-    class = {ClassA, ClassB, ClassC};
+    class = [ClassA, ClassB, ClassC];
 }"#;
 		let ast = parse_ok(src);
 		let TopLevel::Object(obj) = &ast[0] else {

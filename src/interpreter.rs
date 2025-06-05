@@ -1894,7 +1894,7 @@ script main() { startRoom(R); }
 		let src = r#"room R {
     object Key {
         state = 1;
-        states = { { 0, 0, "key1.png" }, { 0, 0, "key2.png" } };
+        states = [ [ 0, 0, "key1.png" ], [ 0, 0, "key2.png" ] ];
     }
     object Door { state = 1; }
 }
@@ -1961,8 +1961,8 @@ script main() { startRoom(R); }
 			object Safe {
 				state  = 1;
 				// two visible states so that setState(2) is valid
-				states = { {0,0,""}, {0,0,""} };
-				class  = {DoorOpener};
+				states = [ [0,0,""], [0,0,""] ];
+				class  = [DoorOpener];
 			}
 		"#;
 
@@ -2066,8 +2066,8 @@ script main() { startRoom(R); }
 			object Safe {
 				state  = 1;
 				// three visible states so 1,2,3 are all valid
-				states = { {0,0,""}, {0,0,""}, {0,0,""} };
-				class  = {DoorOps};
+				states = [ [0,0,""], [0,0,""], [0,0,""] ];
+				class  = [DoorOps];
 				verb vOpen(int this, int that) { setState(this, 3); }  // override
 			}
 		"#;

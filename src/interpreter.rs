@@ -592,7 +592,16 @@ impl WebInterface {
 	fn show_context_menu(&self, obj_id: u32, x: i32, y: i32, verbs: Vec<String>, interp: Interpreter) -> Result<(), JsValue> {
 		if verbs.is_empty() {
 			if let Some(menu) = self.document.get_element_by_id("context-menu") {
-				menu.set_attribute("style", "display:none;")?;
+				menu.set_attribute("class", "")?;
+				// Hide after animation completes
+				let menu_clone = menu.clone();
+				let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+					let _ = menu_clone.set_attribute("style", "display:none;");
+				}) as Box<dyn FnMut()>);
+				web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
+					timeout.as_ref().unchecked_ref(), 150
+				)?;
+				timeout.forget();
 			}
 			return Ok(());
 		}
@@ -605,7 +614,15 @@ impl WebInterface {
 			self.document.body().unwrap().append_child(&div)?;
 			let menu_clone = div.clone();
 			let hide = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
-				let _ = menu_clone.set_attribute("style", "display:none;");
+				let _ = menu_clone.set_attribute("class", "");
+				let menu_clone2 = menu_clone.clone();
+				let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+					let _ = menu_clone2.set_attribute("style", "display:none;");
+				}) as Box<dyn FnMut()>);
+				let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
+					timeout.as_ref().unchecked_ref(), 150
+				);
+				timeout.forget();
 			}) as Box<dyn FnMut(_)>);
 			self.document.add_event_listener_with_callback("click", hide.as_ref().unchecked_ref())?;
 			hide.forget();
@@ -623,13 +640,34 @@ impl WebInterface {
 			let interp_clone = interp.clone();
 			let click = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
 				interp_clone.run_verb(obj_id, &verb_clone, None);
-				let _ = menu_clone.set_attribute("style", "display:none;");
+				let _ = menu_clone.set_attribute("class", "");
+				let menu_clone2 = menu_clone.clone();
+				let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+					let _ = menu_clone2.set_attribute("style", "display:none;");
+				}) as Box<dyn FnMut()>);
+				let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
+					timeout.as_ref().unchecked_ref(), 150
+				);
+				timeout.forget();
 			}) as Box<dyn FnMut(_)>);
 			item.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
 			click.forget();
 			menu.append_child(&item)?;
 		}
+		
+		// Position and show menu with animation
 		menu.set_attribute("style", &format!("position:absolute; left:{}px; top:{}px; display:block;", x, y))?;
+		
+		// Add show class after a brief delay to trigger animation
+		let menu_clone = menu.clone();
+		let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+			let _ = menu_clone.set_attribute("class", "show");
+		}) as Box<dyn FnMut()>);
+		web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
+			timeout.as_ref().unchecked_ref(), 10
+		)?;
+		timeout.forget();
+		
 		Ok(())
 	}
 

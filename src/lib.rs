@@ -53,6 +53,21 @@ fn parse_def_block(pair: Pair<Rule>) -> Result<Block, String> {
 	)
 }
 
+fn parse_binary_expr<O, F>(pair: Pair<Rule>, map_op: fn(&str) -> O, make_expr: F) -> Expression
+where
+	F: Fn(Box<Expression>, O, Box<Expression>) -> Expression,
+{
+	let mut inner = pair.into_inner();
+	let mut expr = parse_expression(inner.next().unwrap());
+	while let Some(op_pair) = inner.next() {
+		let right_pair = inner.next().unwrap();
+		let op = map_op(op_pair.as_str());
+		let right_expr = parse_expression(right_pair);
+		expr = make_expr(Box::new(expr), op, Box::new(right_expr));
+	}
+	expr
+}
+
 fn parse_room_block(pair: Pair<Rule>) -> Result<Block, String> {
 	parse_block_filtered(
 		pair,
@@ -227,72 +242,44 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			}
 			expr
 		},
-		Rule::equality => {
-			let mut inner = pair.into_inner();
-			let mut expr = parse_expression(inner.next().unwrap());
-
-			while let Some(op_pair) = inner.next() {
-				let right_pair = inner.next().unwrap();
-				let op = match op_pair.as_str() {
-					"==" => ast::EqualityOp::Equal,
-					"!=" => ast::EqualityOp::NotEqual,
-					_ => ast::EqualityOp::Equal,
-				};
-				let right_expr = parse_expression(right_pair);
-				expr = Expression::Equality(Box::new(expr), op, Box::new(right_expr));
-			}
-			expr
-		},
-		Rule::comparison => {
-			let mut inner = pair.into_inner();
-			let mut expr = parse_expression(inner.next().unwrap());
-
-			while let Some(op_pair) = inner.next() {
-				let right_pair = inner.next().unwrap();
-				let op = match op_pair.as_str() {
-					"<" => ast::ComparisonOp::Less,
-					">" => ast::ComparisonOp::Greater,
-					"<=" => ast::ComparisonOp::LessEqual,
-					">=" => ast::ComparisonOp::GreaterEqual,
-					_ => ast::ComparisonOp::Less,
-				};
-				let right_expr = parse_expression(right_pair);
-				expr = Expression::Comparison(Box::new(expr), op, Box::new(right_expr));
-			}
-			expr
-		},
-		Rule::term => {
-			let mut inner = pair.into_inner();
-			let mut expr = parse_expression(inner.next().unwrap());
-
-			while let Some(op_pair) = inner.next() {
-				let right_pair = inner.next().unwrap();
-				let op = match op_pair.as_str() {
-					"+" => ast::TermOp::Add,
-					"-" => ast::TermOp::Subtract,
-					_ => ast::TermOp::Add,
-				};
-				let right_expr = parse_expression(right_pair);
-				expr = Expression::Term(Box::new(expr), op, Box::new(right_expr));
-			}
-			expr
-		},
-		Rule::factor => {
-			let mut inner = pair.into_inner();
-			let mut expr = parse_expression(inner.next().unwrap());
-
-			while let Some(op_pair) = inner.next() {
-				let right_pair = inner.next().unwrap();
-				let op = match op_pair.as_str() {
-					"*" => ast::FactorOp::Multiply,
-					"/" => ast::FactorOp::Divide,
-					_ => ast::FactorOp::Multiply,
-				};
-				let right_expr = parse_expression(right_pair);
-				expr = Expression::Factor(Box::new(expr), op, Box::new(right_expr));
-			}
-			expr
-		},
+		Rule::equality => parse_binary_expr(
+			pair,
+			|op| match op {
+				"==" => ast::EqualityOp::Equal,
+				"!=" => ast::EqualityOp::NotEqual,
+				_ => ast::EqualityOp::Equal,
+			},
+			Expression::Equality,
+		),
+		Rule::comparison => parse_binary_expr(
+			pair,
+			|op| match op {
+				"<" => ast::ComparisonOp::Less,
+				">" => ast::ComparisonOp::Greater,
+				"<=" => ast::ComparisonOp::LessEqual,
+				">=" => ast::ComparisonOp::GreaterEqual,
+				_ => ast::ComparisonOp::Less,
+			},
+			Expression::Comparison,
+		),
+		Rule::term => parse_binary_expr(
+			pair,
+			|op| match op {
+				"+" => ast::TermOp::Add,
+				"-" => ast::TermOp::Subtract,
+				_ => ast::TermOp::Add,
+			},
+			Expression::Term,
+		),
+		Rule::factor => parse_binary_expr(
+			pair,
+			|op| match op {
+				"*" => ast::FactorOp::Multiply,
+				"/" => ast::FactorOp::Divide,
+				_ => ast::FactorOp::Multiply,
+			},
+			Expression::Factor,
+		),
 		Rule::unary => {
 			let inner = pair.into_inner();
 			let mut ops = Vec::new();

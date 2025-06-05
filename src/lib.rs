@@ -55,18 +55,18 @@ fn parse_def_block(pair: Pair<Rule>) -> Result<Block, String> {
 
 fn parse_binary_expr<O, F>(pair: Pair<Rule>, map_op: fn(&str) -> O, make_expr: F) -> Expression
 where
-        F: Fn(Box<Expression>, O, Box<Expression>) -> Expression,
+	F: Fn(Box<Expression>, O, Box<Expression>) -> Expression,
 {
-        let mut inner = pair.into_inner();
-        let left = parse_expression(inner.next().unwrap());
-        if let Some(op_pair) = inner.next() {
-                let right_pair = inner.next().unwrap();
-                let op = map_op(op_pair.as_str());
-                let right_expr = parse_expression(right_pair);
-                make_expr(Box::new(left), op, Box::new(right_expr))
-        } else {
-                left
-        }
+	let mut inner = pair.into_inner();
+	let left = parse_expression(inner.next().unwrap());
+	if let Some(op_pair) = inner.next() {
+		let right_pair = inner.next().unwrap();
+		let op = map_op(op_pair.as_str());
+		let right_expr = parse_expression(right_pair);
+		make_expr(Box::new(left), op, Box::new(right_expr))
+	} else {
+		left
+	}
 }
 
 fn parse_room_block(pair: Pair<Rule>) -> Result<Block, String> {
@@ -172,16 +172,12 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 				left
 			}
 		},
-                Rule::logical_or => parse_binary_expr(
-                        pair,
-                        |_| (), // operator has no enum, handled directly
-                        |l, _, r| Expression::LogicalOr(l, r),
-                ),
-                Rule::logical_and => parse_binary_expr(
-                        pair,
-                        |_| (),
-                        |l, _, r| Expression::LogicalAnd(l, r),
-                ),
+		Rule::logical_or => parse_binary_expr(
+			pair,
+			|_| (), // operator has no enum, handled directly
+			|l, _, r| Expression::LogicalOr(l, r),
+		),
+		Rule::logical_and => parse_binary_expr(pair, |_| (), |l, _, r| Expression::LogicalAnd(l, r)),
 		Rule::equality => parse_binary_expr(
 			pair,
 			|op| match op {

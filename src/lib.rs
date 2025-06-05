@@ -21,6 +21,10 @@ struct ScummParser;
 
 use pest::iterators::Pair;
 
+fn unquote(raw: &str) -> &str {
+	&raw[1..raw.len() - 1]
+}
+
 fn parse_block(pair: Pair<Rule>) -> Block {
 	let mut statements = Vec::new();
 	for stmt_pair in pair.into_inner() {
@@ -138,12 +142,7 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let value_pair = inner.next()?;
 			let value = match value_pair.as_rule() {
 				Rule::number => PropertyValue::Number(value_pair.as_str().parse().ok()?),
-				Rule::string => {
-					let raw = value_pair.as_str();
-					// remove the leading and trailing quotes (grammar guarantees they exist)
-					let inner = &raw[1..raw.len() - 1];
-					PropertyValue::String(inner.to_string())
-				},
+				Rule::string => PropertyValue::String(unquote(value_pair.as_str()).to_string()),
 				Rule::identifier => PropertyValue::Identifier(value_pair.as_str().to_string()),
 				_ => return None,
 			};
@@ -189,13 +188,8 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 					let y: i32 = ei.next()?.as_str().parse().ok()?;
 					let img_pair = ei.next()?;
 					let image = match img_pair.as_rule() {
-						Rule::string => {
-							let raw = img_pair.as_str();
-							raw[1..raw.len() - 1].to_string()
-						},
-						Rule::empty_string => {
-							String::new() // Empty string for no graphics
-						},
+						Rule::string => unquote(img_pair.as_str()).to_string(),
+						Rule::empty_string => String::new(), // Empty string for no graphics
 						_ => return None,
 					};
 					states.push(StateEntry { x, y, image });
@@ -322,12 +316,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 fn parse_primary(pair: Pair<Rule>) -> Primary {
 	match pair.as_rule() {
 		Rule::number => Primary::Number(pair.as_str().parse().unwrap_or(0)),
-		Rule::string => {
-			let raw = pair.as_str();
-			// remove the leading and trailing "   (grammar guarantees they exist)
-			let inner = &raw[1..raw.len() - 1];
-			Primary::String(inner.to_string())
-		},
+		Rule::string => Primary::String(unquote(pair.as_str()).to_string()),
 		Rule::identifier => Primary::Identifier(pair.as_str().to_string()),
 		Rule::func_call => {
 			let mut inner = pair.into_inner();

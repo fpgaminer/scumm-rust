@@ -523,45 +523,12 @@ impl WebInterface {
 		Ok(())
 	}
 
-	fn show_object_name(&self, name: &str, x: i32, y: i32) -> Result<(), JsValue> {
-		let label = if let Some(existing) = self.document.get_element_by_id("object-name") {
+	fn show_label(&self, id: &str, text: &str, x: i32, y: i32) -> Result<(), JsValue> {
+		let label = if let Some(existing) = self.document.get_element_by_id(id) {
 			existing
 		} else {
 			let div = self.document.create_element("div")?;
-			div.set_attribute("id", "object-name")?;
-			div.set_attribute("style", "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px;")?;
-			self.game_container.append_child(&div)?;
-			div
-		};
-
-		label.set_inner_html(name);
-		let rect = self.game_container.get_bounding_client_rect();
-		let adj_x = x as f64 - rect.left() + 10.0;
-		let adj_y = y as f64 - rect.top() + 10.0;
-		label.set_attribute(
-                        "style",
-                        &format!(
-                                "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px; left:{}px; top:{}px; display:block;",
-                                adj_x,
-                                adj_y
-                        ),
-                )?;
-		Ok(())
-	}
-
-	fn hide_object_name(&self) -> Result<(), JsValue> {
-		if let Some(label) = self.document.get_element_by_id("object-name") {
-			label.set_attribute("style", "display:none;")?;
-		}
-		Ok(())
-	}
-
-	fn show_use_hint(&self, text: &str, x: i32, y: i32) -> Result<(), JsValue> {
-		let label = if let Some(existing) = self.document.get_element_by_id("use-hint") {
-			existing
-		} else {
-			let div = self.document.create_element("div")?;
-			div.set_attribute("id", "use-hint")?;
+			div.set_attribute("id", id)?;
 			div.set_attribute("style", "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px;")?;
 			self.game_container.append_child(&div)?;
 			div
@@ -582,11 +549,27 @@ impl WebInterface {
 		Ok(())
 	}
 
-	fn hide_use_hint(&self) -> Result<(), JsValue> {
-		if let Some(label) = self.document.get_element_by_id("use-hint") {
+	fn hide_label(&self, id: &str) -> Result<(), JsValue> {
+		if let Some(label) = self.document.get_element_by_id(id) {
 			label.set_attribute("style", "display:none;")?;
 		}
 		Ok(())
+	}
+
+	fn show_object_name(&self, name: &str, x: i32, y: i32) -> Result<(), JsValue> {
+		self.show_label("object-name", name, x, y)
+	}
+
+	fn hide_object_name(&self) -> Result<(), JsValue> {
+		self.hide_label("object-name")
+	}
+
+	fn show_use_hint(&self, text: &str, x: i32, y: i32) -> Result<(), JsValue> {
+		self.show_label("use-hint", text, x, y)
+	}
+
+	fn hide_use_hint(&self) -> Result<(), JsValue> {
+		self.hide_label("use-hint")
 	}
 
 	fn show_context_menu(&self, obj_id: u32, x: i32, y: i32, verbs: Vec<String>, interp: Interpreter) -> Result<(), JsValue> {

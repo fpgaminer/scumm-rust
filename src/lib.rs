@@ -443,23 +443,12 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 		})
 	};
 
-	// one tick per second (for debugging purposes)
+	// one tick per frame
 	window()
-		.set_interval_with_callback_and_timeout_and_arguments_0(tick_closure.as_ref().unchecked_ref(), 1000)
+		.set_interval_with_callback_and_timeout_and_arguments_0(tick_closure.as_ref().unchecked_ref(), 33)
 		.expect("should register `setInterval` OK");
-
+	
 	tick_closure.forget(); // Prevent closure from being dropped
-
-	//let f = Rc::new(RefCell::new(None));
-	//let g = f.clone();
-
-	//*g.borrow_mut() = Some(Closure::new(move || {
-	//	interpreter.tick_web();
-
-	//	request_animation_frame(f.borrow().as_ref().unwrap());
-	//}));
-
-	//request_animation_frame(g.borrow().as_ref().unwrap());
 
 	Ok(())
 }

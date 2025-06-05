@@ -275,23 +275,27 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 			Expression::Factor,
 		),
 		Rule::unary => {
-			let inner = pair.into_inner();
-			let mut ops = Vec::new();
-			let mut expr_pair = None;
+			let pair_clone = pair.clone();
+			let mut inner = pair.into_inner();
+			let expr_pair = inner.next().expect("unary expression missing primary");
 
-			for pair in inner {
-				match pair.as_str() {
-					"!" => ops.push(ast::UnaryOp::Not),
-					"-" => ops.push(ast::UnaryOp::Negate),
-					_ => expr_pair = Some(pair),
+			// Determine unary operators from the prefix before the
+			// primary expression.
+			let span = pair_clone.as_span();
+			let expr_span = expr_pair.as_span();
+			let prefix_len = expr_span.start() - span.start();
+			let prefix = &pair_clone.as_str()[..prefix_len];
+
+			let mut ops = Vec::new();
+			for ch in prefix.chars() {
+				match ch {
+					'!' => ops.push(ast::UnaryOp::Not),
+					'-' => ops.push(ast::UnaryOp::Negate),
+					_ => {},
 				}
 			}
 
-			let mut expr = if let Some(ep) = expr_pair {
-				Expression::Primary(parse_primary(ep))
-			} else {
-				Expression::Primary(Primary::Number(0))
-			};
+			let mut expr = Expression::Primary(parse_primary(expr_pair));
 
 			// Apply unary operators from right to left
 			for op in ops.into_iter().rev() {

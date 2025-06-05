@@ -193,9 +193,8 @@ struct WebInterface {
 	document: Document,
 	game_container: Element,
 	room_container: Element,
+	message_container: Element,
 	inventory_container: Element,
-	container_width: f64,
-	container_height: f64,
 	current_room_image: Rc<RefCell<Option<String>>>,
 	scale_x: Rc<RefCell<f64>>,
 	scale_y: Rc<RefCell<f64>>,
@@ -208,14 +207,10 @@ impl WebInterface {
 		let window = web_sys::window().ok_or("No global `window` exists")?;
 		let document = window.document().ok_or("Should have a document on window")?;
 
-		// Define container dimensions
-		let container_width = 720.0;
-		let container_height = 480.0;
-
 		// Create main game container
 		let game_container = document.create_element("div")?;
 		game_container.set_attribute("id", "game-container")?;
-		game_container.set_attribute("style", &format!("width: {}px; height: {}px;", container_width, container_height))?;
+		game_container.set_attribute("class", "game-container")?;
 
 		// Create room container for objects
 		let room_container = document.create_element("div")?;
@@ -225,10 +220,14 @@ impl WebInterface {
 
 		let inventory_container = document.create_element("div")?;
 		inventory_container.set_attribute("id", "inventory-container")?;
+		let message_container = document.create_element("div")?;
+		message_container.set_attribute("id", "game-message")?;
+		message_container.set_inner_html("&nbsp;");
 
 		// Append to body or app div
 		if let Some(app) = document.get_element_by_id("app") {
 			app.append_child(&game_container)?;
+			app.append_child(&message_container)?;
 			app.append_child(&inventory_container)?;
 		} else {
 			document.body().unwrap().append_child(&game_container)?;
@@ -239,22 +238,19 @@ impl WebInterface {
 			document,
 			game_container,
 			room_container,
+			message_container,
 			inventory_container,
-			container_width,
-			container_height,
 			current_room_image: Rc::new(RefCell::new(None)),
 			scale_x: Rc::new(RefCell::new(1.0)),
 			scale_y: Rc::new(RefCell::new(1.0)),
 			dragging_object: Rc::new(RefCell::new(None)),
 		};
 
-		// Ensure the message box exists so it's visible immediately
-		web_interface.display_message("")?;
-
 		Ok(web_interface)
 	}
 
 	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {
+		let rect = self.game_container.get_bounding_client_rect();
 		let style = if let Some(img) = image {
 			// Store the current room image path
 			*self.current_room_image.borrow_mut() = Some(img.to_string());
@@ -264,21 +260,19 @@ impl WebInterface {
 			let scale_x = self.scale_x.clone();
 			let scale_y = self.scale_y.clone();
 			let room_container = self.room_container.clone();
-			let container_width = self.container_width;
-			let container_height = self.container_height;
 			let image_element_clone = image_element.clone();
 
 			// Create a closure to handle image load
 			let onload = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 				let width = image_element_clone.natural_width() as f64;
 				let height = image_element_clone.natural_height() as f64;
-				let container_ratio = container_width / container_height;
+				let container_ratio = rect.width() / rect.height();
 				let room_ratio = width / height;
 				let (sx, sy) = if container_ratio > room_ratio {
-					let s = container_height / height;
+					let s = rect.height() / height;
 					(s, s)
 				} else {
-					let s = container_width / width;
+					let s = rect.width() / width;
 					(s, s)
 				};
 				*scale_x.borrow_mut() = sx;
@@ -292,18 +286,15 @@ impl WebInterface {
 			image_element.set_src(img);
 
 			format!(
-				"position: relative; width: {}px; height: {}px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
-				self.container_width, self.container_height, img
+				"background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
+				img
 			)
 		} else {
 			*self.current_room_image.borrow_mut() = None;
 			*self.scale_x.borrow_mut() = 1.0;
 			*self.scale_y.borrow_mut() = 1.0;
 			self.room_container.set_attribute("style", "transform: scale(1, 1);")?;
-			format!(
-				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
-				self.container_width, self.container_height
-			)
+			"background: #000; margin: 0 auto; border: 2px solid #333;".to_string()
 		};
 		self.game_container.set_attribute("style", &style)
 	}
@@ -432,17 +423,7 @@ impl WebInterface {
 	}
 
 	fn display_message(&self, message: &str) -> Result<(), JsValue> {
-		// Create or update message area
-		let message_div = if let Some(existing) = self.document.get_element_by_id("game-message") {
-			existing
-		} else {
-			let div = self.document.create_element("div")?;
-			div.set_attribute("id", "game-message")?;
-			self.game_container.append_child(&div)?;
-			div
-		};
-
-		message_div.set_inner_html(message);
+		self.message_container.set_inner_html(message);
 		Ok(())
 	}
 

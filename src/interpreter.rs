@@ -2089,4 +2089,38 @@ script main() { startRoom(R); }
 		assert_eq!(vars.get("bad"), Some(&Value::Bool(false)));
 		assert_eq!(vars.get("res"), Some(&Value::Number(5)));
 	}
+
+	/// Ensure chained assignments evaluate **right-to-left** and propagate
+	/// the final value to *every* lhs.
+	#[test]
+	fn chained_assignment_evaluates_right_to_left() {
+		let vars = run_script(
+			r#"
+			script main() {
+				int a = 0;
+				int b = 0;
+				a = b = 7;      // RHS (b = 7) runs first
+			}
+			"#,
+		);
+		assert_eq!(vars.get("a"), Some(&Value::Number(7)));
+		assert_eq!(vars.get("b"), Some(&Value::Number(7)));
+	}
+
+	/// Equality on strings (non-numeric operands) should work the same way
+	/// as numeric equality.
+	#[test]
+	fn string_equality_works() {
+		let vars = run_script(
+			r#"
+			script main() {
+				string hello = "hi";
+				bool   same  = hello == "hi";
+				bool   diff  = hello == "bye";
+			}
+			"#,
+		);
+		assert_eq!(vars.get("same"), Some(&Value::Bool(true)));
+		assert_eq!(vars.get("diff"), Some(&Value::Bool(false)));
+	}
 }

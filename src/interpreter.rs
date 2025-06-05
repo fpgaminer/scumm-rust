@@ -215,33 +215,16 @@ impl WebInterface {
 		// Create main game container
 		let game_container = document.create_element("div")?;
 		game_container.set_attribute("id", "game-container")?;
-		game_container.set_attribute(
-			"style",
-			&format!(
-				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
-				container_width, container_height
-			),
-		)?;
 
 		// Create room container for objects
 		let room_container = document.create_element("div")?;
 		room_container.set_attribute("id", "room-container")?;
-		room_container.set_attribute(
-			"style",
-			"position: relative; width: 100%; height: 100%; transform-origin: top left; transform: scale(1, 1);",
-		)?;
+		room_container.set_attribute("style", "transform: scale(1, 1);")?;
 
 		game_container.append_child(&room_container)?;
 
 		let inventory_container = document.create_element("div")?;
 		inventory_container.set_attribute("id", "inventory-container")?;
-		inventory_container.set_attribute(
-			"style",
-			&format!(
-				"width: {}px; min-height: 40px; margin: 4px auto; display: flex; gap: 4px; background: #222; padding: 4px; border: 1px solid #666; box-sizing: border-box;",
-				container_width
-			),
-		)?;
 
 		// Append to body or app div
 		if let Some(app) = document.get_element_by_id("app") {
@@ -314,24 +297,19 @@ impl WebInterface {
 			onload.forget(); // Keep the closure alive
 			image_element.set_src(img);
 
-			format!(
-				"position: relative; width: {}px; height: {}px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
-				self.container_width, self.container_height, img
-			)
+			format!("background: #000 url('{}') no-repeat center/cover;", img)
 		} else {
 			*self.current_room_image.borrow_mut() = None;
 			*self.scale_x.borrow_mut() = 1.0;
 			*self.scale_y.borrow_mut() = 1.0;
-			self.room_container.set_attribute(
-				"style",
-				"position: relative; width: 100%; height: 100%; transform-origin: top left; transform: scale(1, 1);",
-			)?;
-			format!(
-				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
-				self.container_width, self.container_height
-			)
+			self.room_container.set_attribute("style", "transform: scale(1, 1);")?;
+			String::new()
 		};
-		self.game_container.set_attribute("style", &style)
+		if style.is_empty() {
+			self.game_container.remove_attribute("style")
+		} else {
+			self.game_container.set_attribute("style", &style)
+		}
 	}
 
 	fn clear_room(&self) {
@@ -514,7 +492,6 @@ impl WebInterface {
 		} else {
 			let div = self.document.create_element("div")?;
 			div.set_attribute("id", "game-message")?;
-			div.set_attribute("style", "position: absolute; bottom: 10px; left: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 10px; font-family: monospace; border: 1px solid #666;")?;
 			self.game_container.append_child(&div)?;
 			div
 		};
@@ -529,7 +506,6 @@ impl WebInterface {
 		} else {
 			let div = self.document.create_element("div")?;
 			div.set_attribute("id", id)?;
-			div.set_attribute("style", "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px;")?;
 			self.game_container.append_child(&div)?;
 			div
 		};
@@ -538,14 +514,7 @@ impl WebInterface {
 		let rect = self.game_container.get_bounding_client_rect();
 		let adj_x = x as f64 - rect.left() + 10.0;
 		let adj_y = y as f64 - rect.top() + 10.0;
-		label.set_attribute(
-                        "style",
-                        &format!(
-                                "position:absolute; pointer-events:none; background: rgba(0,0,0,0.8); color:white; padding:2px 4px; font-family:monospace; font-size:12px; border:1px solid #666; border-radius:4px; left:{}px; top:{}px; display:block;",
-                                adj_x,
-                                adj_y
-                        ),
-                )?;
+		label.set_attribute("style", &format!("left:{}px; top:{}px; display:block;", adj_x, adj_y))?;
 		Ok(())
 	}
 
@@ -593,7 +562,6 @@ impl WebInterface {
 		} else {
 			let div = self.document.create_element("div")?;
 			div.set_attribute("id", "context-menu")?;
-			div.set_attribute("style", "position:absolute; display:none;")?;
 			self.document.body().unwrap().append_child(&div)?;
 			let menu_clone = div.clone();
 			let hide = wasm_bindgen::closure::Closure::wrap(Box::new(move |_e: web_sys::MouseEvent| {
@@ -639,7 +607,7 @@ impl WebInterface {
 		}
 
 		// Position and show menu with animation
-		menu.set_attribute("style", &format!("position:absolute; left:{}px; top:{}px; display:block;", x, y))?;
+		menu.set_attribute("style", &format!("left:{}px; top:{}px; display:block;", x, y))?;
 
 		// Add show class after a brief delay to trigger animation
 		let menu_clone = menu.clone();
@@ -662,7 +630,7 @@ impl WebInterface {
 			if let Some(obj) = interp.with_object_by_id(*id, |o| o.clone()) {
 				let div = self.document.create_element("div")?;
 				div.set_attribute("class", "inventory-item")?;
-				let mut style = "width:32px;height:32px;margin:2px;border:1px solid #555;background:#111;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;".to_string();
+				let mut style = String::new();
 				if obj.state > 0 {
 					if let Some(img) = obj.states.get(obj.state as usize - 1) {
 						if !img.is_empty() {
@@ -677,7 +645,9 @@ impl WebInterface {
 				} else {
 					div.set_inner_html(&obj.name);
 				}
-				div.set_attribute("style", &style)?;
+				if !style.is_empty() {
+					div.set_attribute("style", &style)?;
+				}
 				div.set_attribute("draggable", "true")?;
 
 				// Drag start to initiate use

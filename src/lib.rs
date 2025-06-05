@@ -447,7 +447,7 @@ fn handle_script(data: &[u8]) -> Result<(), anyhow::Error> {
 	window()
 		.set_interval_with_callback_and_timeout_and_arguments_0(tick_closure.as_ref().unchecked_ref(), 33)
 		.expect("should register `setInterval` OK");
-	
+
 	tick_closure.forget(); // Prevent closure from being dropped
 
 	Ok(())

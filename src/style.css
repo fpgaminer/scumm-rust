@@ -159,6 +159,14 @@ button:focus-visible {
   z-index: 10;
 }
 
+#room-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-origin: top left;
+  transform: scale(1, 1);
+}
+
 .game-object {
   transition: all 0.25s ease-out;
   cursor: pointer;
@@ -202,12 +210,11 @@ button:focus-visible {
   font-size: 14px;
   max-width: 600px;
   word-wrap: break-word;
-  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 50%, #0f0f0f 100%);
+  background: rgba(0,0,0,0.8);
   color: #e8e8e8;
-  border: 3px solid;
-  border-color: #666 #333 #333 #666;
-  padding: 12px 16px;
-  font-family: 'Courier New', 'Lucida Console', monospace;
+  border: 1px solid #666;
+  padding: 10px;
+  font-family: monospace;
   font-weight: bold;
   text-shadow: 1px 1px 0px rgba(0, 0, 0, 0.8);
   box-shadow: 
@@ -215,9 +222,12 @@ button:focus-visible {
     6px 6px 12px rgba(0, 0, 0, 0.8),
     inset 1px 1px 0px rgba(255, 255, 255, 0.15),
     inset -1px -1px 0px rgba(0, 0, 0, 0.5);
-  position: relative;
+  position: absolute;
   margin: 8px;
   border-radius: 2px;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
 }
 
 #game-message::before {
@@ -233,29 +243,28 @@ button:focus-visible {
   pointer-events: none;
 }
 
-/* Object name tooltip - Retro style */
-#object-name {
-  font-size: 13px;
+.game-tooltip {
   pointer-events: none;
-  background: linear-gradient(90deg, #4a4a00 0%, #666600 50%, #4a4a00 100%);
+  background: rgba(0,0,0,0.8);
   color: #fff;
-  padding: 4px 8px;
-  border: 2px solid;
-  border-color: #888 #444 #444 #888;
-  font-family: 'Courier New', 'Lucida Console', monospace;
+  padding: 2px 4px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  font-family: monospace;
   font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  text-shadow: 
+  font-size: 12px;
+  text-shadow:
     0 0 4px #ffff88,
     1px 1px 0px rgba(0, 0, 0, 0.9);
   box-shadow: 
     2px 2px 0px #000,
     4px 4px 8px rgba(0, 0, 0, 0.6),
     inset 0 0 8px rgba(255, 255, 0, 0.2);
-  border-radius: 2px;
-  position: relative;
+  position: absolute;
   z-index: 999;
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 #object-name::after {
@@ -272,33 +281,14 @@ button:focus-visible {
   filter: drop-shadow(2px 2px 0px #000);
 }
 
-/* Use hint tooltip */
-#use-hint {
-  font-size: 12px;
-  pointer-events: none;
-  background: linear-gradient(90deg, #004a4a 0%, #006666 50%, #004a4a 100%);
-  color: #88ffff;
-  padding: 3px 6px;
-  border: 1px solid #006666;
-  font-family: 'Courier New', 'Lucida Console', monospace;
-  font-weight: bold;
-  text-shadow: 0 0 3px #88ffff;
-  box-shadow: 
-    1px 1px 0px #000,
-    2px 2px 4px rgba(0, 0, 0, 0.5);
-  border-radius: 2px;
-  opacity: 0.9;
-}
-
 /* Inventory container - Retro SCUMM style */
 #inventory-container {
   display: flex;
-  gap: 6px;
-  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 50%, #0f0f0f 100%);
-  padding: 8px 12px;
-  border: 3px solid;
-  border-color: #666 #333 #333 #666;
-  margin: 8px auto;
+  gap: 4px;
+  background: #222;
+  padding: 4px;
+  border: 1px solid #666;
+  margin: 4px auto;
   box-sizing: border-box;
   justify-content: flex-start;
   align-items: center;
@@ -309,6 +299,7 @@ button:focus-visible {
     inset -1px -1px 0px rgba(0, 0, 0, 0.5);
   position: relative;
   border-radius: 2px;
+  min-height: 40px;
 }
 
 #inventory-container::before {
@@ -332,14 +323,13 @@ button:focus-visible {
 }
 
 .inventory-item {
-  width: 36px;
-  height: 36px;
-  border: 2px solid;
-  border-color: #555 #222 #222 #555;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #555;
+  background:#111;
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  background-color: #1a1a1a;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -351,10 +341,12 @@ button:focus-visible {
   z-index: 2;
   font-family: 'Courier New', 'Lucida Console', monospace;
   font-weight: bold;
+  font-size: 12px;
   text-shadow: 1px 1px 0px rgba(0, 0, 0, 0.8);
   box-shadow: 
     inset 1px 1px 0px rgba(255, 255, 255, 0.1),
     2px 2px 0px #000;
+  margin: 2px;
 }
 
 .inventory-item:hover {

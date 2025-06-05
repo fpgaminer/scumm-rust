@@ -598,9 +598,9 @@ impl WebInterface {
 				let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 					let _ = menu_clone.set_attribute("style", "display:none;");
 				}) as Box<dyn FnMut()>);
-				web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
-					timeout.as_ref().unchecked_ref(), 150
-				)?;
+				web_sys::window()
+					.unwrap()
+					.set_timeout_with_callback_and_timeout_and_arguments_0(timeout.as_ref().unchecked_ref(), 150)?;
 				timeout.forget();
 			}
 			return Ok(());
@@ -619,9 +619,9 @@ impl WebInterface {
 				let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 					let _ = menu_clone2.set_attribute("style", "display:none;");
 				}) as Box<dyn FnMut()>);
-				let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
-					timeout.as_ref().unchecked_ref(), 150
-				);
+				let _ = web_sys::window()
+					.unwrap()
+					.set_timeout_with_callback_and_timeout_and_arguments_0(timeout.as_ref().unchecked_ref(), 150);
 				timeout.forget();
 			}) as Box<dyn FnMut(_)>);
 			self.document.add_event_listener_with_callback("click", hide.as_ref().unchecked_ref())?;
@@ -645,29 +645,29 @@ impl WebInterface {
 				let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 					let _ = menu_clone2.set_attribute("style", "display:none;");
 				}) as Box<dyn FnMut()>);
-				let _ = web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
-					timeout.as_ref().unchecked_ref(), 150
-				);
+				let _ = web_sys::window()
+					.unwrap()
+					.set_timeout_with_callback_and_timeout_and_arguments_0(timeout.as_ref().unchecked_ref(), 150);
 				timeout.forget();
 			}) as Box<dyn FnMut(_)>);
 			item.add_event_listener_with_callback("click", click.as_ref().unchecked_ref())?;
 			click.forget();
 			menu.append_child(&item)?;
 		}
-		
+
 		// Position and show menu with animation
 		menu.set_attribute("style", &format!("position:absolute; left:{}px; top:{}px; display:block;", x, y))?;
-		
+
 		// Add show class after a brief delay to trigger animation
 		let menu_clone = menu.clone();
 		let timeout = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
 			let _ = menu_clone.set_attribute("class", "show");
 		}) as Box<dyn FnMut()>);
-		web_sys::window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
-			timeout.as_ref().unchecked_ref(), 10
-		)?;
+		web_sys::window()
+			.unwrap()
+			.set_timeout_with_callback_and_timeout_and_arguments_0(timeout.as_ref().unchecked_ref(), 10)?;
 		timeout.forget();
-		
+
 		Ok(())
 	}
 

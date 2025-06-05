@@ -31,44 +31,34 @@ fn parse_block(pair: Pair<Rule>) -> Block {
 	Block { statements }
 }
 
-fn parse_def_block(pair: Pair<Rule>) -> Result<Block, String> {
+fn parse_block_filtered(pair: Pair<Rule>, allowed: &[Rule], context: &str) -> Result<Block, String> {
 	let mut statements = Vec::new();
 	for stmt_pair in pair.into_inner() {
-		match stmt_pair.as_rule() {
-			Rule::verb_stmt | Rule::states_assign | Rule::class_assign | Rule::prop_assign => {
-				if let Some(statement) = parse_statement(stmt_pair) {
-					statements.push(statement);
-				}
-			},
-			_ => {
-				return Err(format!(
-					"Unexpected statement '{:?}' in def_block, expected: verb_stmt, states_assign, class_assign, or prop_assign",
-					stmt_pair.as_rule()
-				));
-			},
+		if allowed.contains(&stmt_pair.as_rule()) {
+			if let Some(statement) = parse_statement(stmt_pair) {
+				statements.push(statement);
+			}
+		} else {
+			return Err(format!("Unexpected statement '{:?}' in {}", stmt_pair.as_rule(), context));
 		}
 	}
 	Ok(Block { statements })
 }
 
+fn parse_def_block(pair: Pair<Rule>) -> Result<Block, String> {
+	parse_block_filtered(
+		pair,
+		&[Rule::verb_stmt, Rule::states_assign, Rule::class_assign, Rule::prop_assign],
+		"def_block, expected: verb_stmt, states_assign, class_assign, or prop_assign",
+	)
+}
+
 fn parse_room_block(pair: Pair<Rule>) -> Result<Block, String> {
-	let mut statements = Vec::new();
-	for stmt_pair in pair.into_inner() {
-		match stmt_pair.as_rule() {
-			Rule::prop_assign | Rule::verb_stmt | Rule::object_def | Rule::script_def => {
-				if let Some(statement) = parse_statement(stmt_pair) {
-					statements.push(statement);
-				}
-			},
-			_ => {
-				return Err(format!(
-					"Unexpected statement '{:?}' in room_block, expected: prop_assign, verb_stmt, object_def, or script_def",
-					stmt_pair.as_rule()
-				));
-			},
-		}
-	}
-	Ok(Block { statements })
+	parse_block_filtered(
+		pair,
+		&[Rule::prop_assign, Rule::verb_stmt, Rule::object_def, Rule::script_def],
+		"room_block, expected: prop_assign, verb_stmt, object_def, or script_def",
+	)
 }
 
 fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {

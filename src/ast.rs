@@ -1,5 +1,6 @@
 use crate::interpreter::{Ctx, Declaration, Interpreter, ObjectDef, RoomDef, Value};
 use async_recursion::async_recursion;
+use log::warn;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopLevel {
@@ -45,40 +46,65 @@ impl Object {
 		for stmt in &self.body.statements {
 			match stmt {
 				Statement::PropertyAssignment(prop) if prop.name == "name" => {
-					if let PropertyValue::String(name) = &prop.value {
-						obj.name = name.clone();
-					} else {
-						anyhow::bail!("Property 'name' must be a string");
-					}
+					let Value::Str(name) = prop.value.const_eval()? else {
+						anyhow::bail!("name must be string");
+					};
+					obj.name = name;
 				},
 				Statement::PropertyAssignment(prop) if prop.name == "state" => {
-					if let PropertyValue::Number(state) = &prop.value {
-						obj.state = (*state).try_into().map_err(|_| anyhow::anyhow!("State must be >= 0"))?;
-					} else {
-						anyhow::bail!("Property 'state' must be a number");
-					}
+					let Value::Number(n) = prop.value.const_eval()? else {
+						anyhow::bail!("state must be numeric");
+					};
+					obj.state = n.try_into()?;
 				},
 				Statement::PropertyAssignment(prop) if prop.name == "x" || prop.name == "y" || prop.name == "w" || prop.name == "h" => {
-					if let PropertyValue::Number(v) = &prop.value {
-						match prop.name.as_str() {
-							"x" => obj.x = *v,
-							"y" => obj.y = *v,
-							"w" => obj.width = (*v).try_into().map_err(|_| anyhow::anyhow!("Width must be >= 0"))?,
-							"h" => obj.height = (*v).try_into().map_err(|_| anyhow::anyhow!("Height must be >= 0"))?,
-							_ => unreachable!(), // Handled above
-						}
-					} else {
-						anyhow::bail!("Property '{}' must be a number", prop.name);
+					let Value::Number(n) = prop.value.const_eval()? else {
+						anyhow::bail!("{:?} must be numeric", prop.name);
+					};
+					match prop.name.as_str() {
+						"x" => obj.x = n,
+						"y" => obj.y = n,
+						"w" => obj.width = n.try_into()?,
+						"h" => obj.height = n.try_into()?,
+						_ => unreachable!(),
 					}
 				},
-				Statement::States(entries) => {
-					obj.states = entries.iter().map(|e| e.image.clone()).collect();
+				Statement::PropertyAssignment(prop) if prop.name == "states" => {
+					// expect { {x,y,"img"}, … } but we only keep the img list for now
+					let Value::Array(arr) = prop.value.const_eval()? else {
+						anyhow::bail!("states must be array");
+					};
+					obj.states = arr
+						.into_iter()
+						.filter_map(|v| match v {
+							Value::Array(vec) if vec.len() == 3 => {
+								if let Value::Str(img) = &vec[2] {
+									Some(img.clone())
+								} else {
+									None
+								}
+							},
+							_ => {
+								warn!("Ignoring invalid state definition: {:?}", v);
+								None
+							},
+						})
+						.collect();
+				},
+				Statement::PropertyAssignment(prop) if prop.name == "class" => {
+					let Value::Array(arr) = prop.value.const_eval()? else {
+						anyhow::bail!("class must be array of identifiers");
+					};
+					obj.classes = arr
+						.into_iter()
+						.filter_map(|v| match v {
+							Value::Str(s) => Some(s),
+							_ => None,
+						})
+						.collect();
 				},
 				Statement::PropertyAssignment(prop) => {
 					anyhow::bail!("Unsupported property assignment in object definition: {:?}", prop);
-				},
-				Statement::ClassAssignment(class_names) => {
-					obj.classes = class_names.clone();
 				},
 				Statement::Verb(verb_stmt) => {
 					if let Some(body) = &verb_stmt.body {
@@ -140,11 +166,10 @@ impl Room {
 		for stmt in &self.body.statements {
 			match stmt {
 				Statement::PropertyAssignment(prop) if prop.name == "image" => {
-					if let PropertyValue::String(image) = &prop.value {
-						room_def.image = Some(image.clone());
-					} else {
+					let Value::Str(image) = prop.value.const_eval()? else {
 						anyhow::bail!("Property 'image' must be a string");
-					}
+					};
+					room_def.image = Some(image);
 				},
 				Statement::ObjectDeclaration(obj_stmt) => {
 					objects.push(obj_stmt.exec(interp)?);
@@ -190,12 +215,9 @@ pub enum Statement {
 	Expression(Expression),
 	If(IfStatement),
 	While(WhileStatement),
-	ClassAssignment(Vec<String>),
 	Verb(VerbStatement),
 	VariableDeclaration(VariableDeclaration),
 	PropertyAssignment(PropertyAssignment),
-	States(Vec<StateEntry>),
-	State(StateStatement),
 	ObjectDeclaration(Object),
 	ScriptDeclaration(Script),
 }
@@ -261,27 +283,13 @@ pub struct VariableDeclaration {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyAssignment {
 	pub name: String,
-	pub value: PropertyValue,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PropertyValue {
-	Number(i32),
-	String(String),
-	Identifier(String),
+	pub value: Expression,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StateStatement {
 	pub number: u32,
 	pub assignments: Vec<(String, Primary)>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StateEntry {
-	pub x: i32,
-	pub y: i32,
-	pub image: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,6 +366,20 @@ impl Expression {
 			},
 		}
 	}
+
+	pub fn const_eval(&self) -> anyhow::Result<Value> {
+		Ok(match self {
+			Expression::Primary(p) => p.const_eval()?,
+			Expression::Assignment(..)
+			| Expression::LogicalOr(..)
+			| Expression::LogicalAnd(..)
+			| Expression::Equality(..)
+			| Expression::Comparison(..)
+			| Expression::Term(..)
+			| Expression::Factor(..)
+			| Expression::Unary(..) => anyhow::bail!("non-literal in constant context"),
+		})
+	}
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -395,6 +417,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Primary {
 	FunctionCall(FunctionCall),
+	Array(Vec<Expression>),
 	Number(u32),
 	String(String),
 	Identifier(String),
@@ -406,6 +429,13 @@ impl Primary {
 		match self {
 			Primary::Number(n) => Ok(Value::Number(*n as i32)),
 			Primary::String(s) => Ok(Value::Str(s.clone())),
+			Primary::Array(elems) => {
+				let mut vals = Vec::with_capacity(elems.len());
+				for e in elems {
+					vals.push(e.exec(ctx).await?);
+				}
+				Ok(Value::Array(vals))
+			},
 
 			Primary::Identifier(id) => {
 				if let Some(v) = ctx.vars.borrow().get(id) {
@@ -421,6 +451,17 @@ impl Primary {
 			Primary::FunctionCall(call) => call.exec(ctx).await,
 			Primary::Parenthesized(expr) => expr.exec(ctx).await,
 		}
+	}
+
+	fn const_eval(&self) -> anyhow::Result<Value> {
+		Ok(match self {
+			Primary::Number(n) => Value::Number(*n as i32),
+			Primary::String(s) => Value::Str(s.clone()),
+			Primary::Identifier(id) => Value::Str(id.clone()), // keep same behaviour
+			Primary::Array(items) => Value::Array(items.iter().map(|e| e.const_eval()).collect::<anyhow::Result<_>>()?),
+			Primary::FunctionCall(_) => anyhow::bail!("Function calls cannot be evaluated at compile time"),
+			Primary::Parenthesized(e) => return e.const_eval(),
+		})
 	}
 }
 

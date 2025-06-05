@@ -815,6 +815,7 @@ pub enum Value {
 	Number(i32),
 	Bool(bool),
 	Str(String),
+	Array(Vec<Value>),
 	Null,
 }
 
@@ -824,6 +825,7 @@ impl Value {
 			Value::Bool(b) => *b,
 			Value::Number(n) => *n != 0,
 			Value::Str(s) => !s.is_empty(),
+			Value::Array(arr) => !arr.is_empty(),
 			Value::Null => false,
 		}
 	}
@@ -845,6 +847,16 @@ impl Value {
 			Value::Str(s) => s.clone(),
 			Value::Number(n) => n.to_string(),
 			Value::Bool(b) => b.to_string(),
+			Value::Array(arr) => {
+				let mut result = String::new();
+				for (i, v) in arr.iter().enumerate() {
+					if i > 0 {
+						result.push_str(", ");
+					}
+					result.push_str(&v.as_string());
+				}
+				result
+			},
 			Value::Null => "<null>".into(),
 		}
 	}

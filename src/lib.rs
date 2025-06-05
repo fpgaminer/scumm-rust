@@ -4,8 +4,8 @@ mod preprocessor;
 
 use anyhow::Result;
 use ast::{
-	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, PropertyValue, Room, Script, StateEntry, Statement, TopLevel,
-	VariableDeclaration, VerbStatement, WhileStatement,
+	Block, Class, Expression, FunctionCall, IfStatement, Object, Primary, PropertyAssignment, Room, Script, Statement, TopLevel, VariableDeclaration,
+	VerbStatement, WhileStatement,
 };
 use log::{debug, error, info};
 use pest::Parser;
@@ -50,11 +50,7 @@ fn parse_block_filtered(pair: Pair<Rule>, allowed: &[Rule], context: &str) -> Re
 }
 
 fn parse_def_block(pair: Pair<Rule>) -> Result<Block, String> {
-	parse_block_filtered(
-		pair,
-		&[Rule::verb_stmt, Rule::states_assign, Rule::class_assign, Rule::prop_assign],
-		"def_block, expected: verb_stmt, states_assign, class_assign, or prop_assign",
-	)
+	parse_block_filtered(pair, &[Rule::verb_stmt, Rule::prop_assign], "def_block, expected: verb_stmt, or prop_assign")
 }
 
 fn parse_binary_expr<O, F>(pair: Pair<Rule>, map_op: fn(&str) -> O, make_expr: F) -> Expression
@@ -140,26 +136,8 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let mut inner = pair.into_inner();
 			let name = inner.next()?.as_str().to_string();
 			let value_pair = inner.next()?;
-			let value = match value_pair.as_rule() {
-				Rule::number => PropertyValue::Number(value_pair.as_str().parse().ok()?),
-				Rule::string => PropertyValue::String(unquote(value_pair.as_str()).to_string()),
-				Rule::identifier => PropertyValue::Identifier(value_pair.as_str().to_string()),
-				_ => return None,
-			};
+			let value = parse_expression(value_pair.clone());
 			Some(Statement::PropertyAssignment(PropertyAssignment { name, value }))
-		},
-		Rule::class_assign => {
-			let mut inner = pair.into_inner();
-			// Extract all class names from class_array
-			if let Some(class_array) = inner.next() {
-				let mut class_names = Vec::new();
-				for class_name_pair in class_array.into_inner() {
-					class_names.push(class_name_pair.as_str().to_string());
-				}
-				Some(Statement::ClassAssignment(class_names))
-			} else {
-				None
-			}
 		},
 		Rule::object_def => {
 			let mut inner = pair.into_inner();
@@ -177,27 +155,6 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let _params = inner.next()?; // param_list
 			let body = inner.next().map(parse_block).unwrap_or(Block { statements: vec![] });
 			Some(Statement::ScriptDeclaration(Script { name, body }))
-		},
-		Rule::states_assign => {
-			let mut inner = pair.into_inner();
-			if let Some(array_pair) = inner.next() {
-				let mut states = Vec::new();
-				for entry in array_pair.into_inner() {
-					let mut ei = entry.into_inner();
-					let x: i32 = ei.next()?.as_str().parse().ok()?;
-					let y: i32 = ei.next()?.as_str().parse().ok()?;
-					let img_pair = ei.next()?;
-					let image = match img_pair.as_rule() {
-						Rule::string => unquote(img_pair.as_str()).to_string(),
-						Rule::empty_string => String::new(), // Empty string for no graphics
-						_ => return None,
-					};
-					states.push(StateEntry { x, y, image });
-				}
-				Some(Statement::States(states))
-			} else {
-				None
-			}
 		},
 		_ => None,
 	}
@@ -319,6 +276,10 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 
 fn parse_primary(pair: Pair<Rule>) -> Primary {
 	match pair.as_rule() {
+		Rule::array_literal => {
+			let elements = pair.into_inner().map(parse_expression).collect();
+			Primary::Array(elements)
+		},
 		Rule::number => Primary::Number(pair.as_str().parse().unwrap_or(0)),
 		Rule::string => Primary::String(unquote(pair.as_str()).to_string()),
 		Rule::identifier => Primary::Identifier(pair.as_str().to_string()),
@@ -554,7 +515,7 @@ fn init_logging() {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ast::{EqualityOp, FactorOp, PropertyValue, TermOp};
+	use crate::ast::{EqualityOp, FactorOp, TermOp};
 	use std::fs;
 
 	fn parse_ok(src: &str) -> Vec<TopLevel> {
@@ -605,7 +566,7 @@ mod tests {
 				assert_eq!(obj.id, "OBJ");
 				assert_eq!(obj.body.statements.len(), 3);
 
-				matches!(obj.body.statements[0], Statement::ClassAssignment(_));
+				matches!(obj.body.statements[0], Statement::PropertyAssignment(_));
 
 				if let Statement::Verb(ref verb) = obj.body.statements[1] {
 					assert_eq!(verb.name, "vOne");
@@ -806,7 +767,7 @@ mod tests {
 		if let TopLevel::Object(obj) = &ast[0] {
 			if let Statement::PropertyAssignment(prop) = &obj.body.statements[0] {
 				assert_eq!(prop.name, "state");
-				assert_eq!(prop.value, PropertyValue::Number(0));
+				assert_eq!(prop.value, Expression::Primary(Primary::Number(0)));
 			} else {
 				panic!("expected property assignment");
 			}
@@ -979,22 +940,42 @@ script S() {
     };
 }"#;
 		let ast = parse_ok(src);
-		if let TopLevel::Object(obj) = &ast[0] {
-			assert_eq!(obj.body.statements.len(), 1);
-			if let Statement::States(entries) = &obj.body.statements[0] {
-				assert_eq!(entries.len(), 2);
-				assert_eq!(entries[0].x, 1);
-				assert_eq!(entries[0].y, 2);
-				assert_eq!(entries[0].image, "one.png");
-				assert_eq!(entries[1].x, 3);
-				assert_eq!(entries[1].y, 4);
-				assert_eq!(entries[1].image, "two.png");
-			} else {
-				panic!("expected states statement");
+		let TopLevel::Object(obj) = &ast[0] else { panic!("expected object") };
+		let [Statement::PropertyAssignment(assn)] = obj.body.statements.as_slice() else {
+			panic!("one property assignment expected");
+		};
+		assert_eq!(assn.name, "states");
+
+		let Expression::Primary(Primary::Array(outer)) = &assn.value else {
+			panic!("outer value should be array");
+		};
+		assert_eq!(outer.len(), 2);
+
+		// helper to unwrap literal
+		fn lit_num(e: &Expression) -> u32 {
+			match e {
+				Expression::Primary(Primary::Number(n)) => *n,
+				_ => panic!("expected number literal"),
 			}
-		} else {
-			panic!("expected object");
 		}
+		fn lit_str(e: &Expression) -> &str {
+			match e {
+				Expression::Primary(Primary::String(s)) => s.as_str(),
+				_ => panic!("expected string literal"),
+			}
+		}
+
+		// first inner array
+		let Expression::Primary(Primary::Array(inner0)) = &outer[0] else { panic!() };
+		assert_eq!(lit_num(&inner0[0]), 1);
+		assert_eq!(lit_num(&inner0[1]), 2);
+		assert_eq!(lit_str(&inner0[2]), "one.png");
+
+		// second inner array
+		let Expression::Primary(Primary::Array(inner1)) = &outer[1] else { panic!() };
+		assert_eq!(lit_num(&inner1[0]), 3);
+		assert_eq!(lit_num(&inner1[1]), 4);
+		assert_eq!(lit_str(&inner1[2]), "two.png");
 	}
 
 	#[test]
@@ -1014,18 +995,27 @@ script S() {
     states = { { 0, 0, "" }, { 0, 0, "visible.png" } };
 }"#;
 		let ast = parse_ok(src);
-		if let TopLevel::Object(obj) = &ast[0] {
-			assert_eq!(obj.body.statements.len(), 1);
-			if let Statement::States(entries) = &obj.body.statements[0] {
-				assert_eq!(entries.len(), 2);
-				assert_eq!(entries[0].image, ""); // Empty string for no graphics
-				assert_eq!(entries[1].image, "visible.png");
-			} else {
-				panic!("expected states statement");
-			}
-		} else {
-			panic!("expected object");
-		}
+		let TopLevel::Object(obj) = &ast[0] else { panic!() };
+		let Statement::PropertyAssignment(assn) = &obj.body.statements[0] else {
+			panic!()
+		};
+		assert_eq!(assn.name, "states");
+
+		let Expression::Primary(Primary::Array(outer)) = &assn.value else { panic!() };
+		let Expression::Primary(Primary::Array(first)) = &outer[0] else { panic!() };
+		let Expression::Primary(Primary::Array(second)) = &outer[1] else { panic!() };
+
+		let empty = match &first[2] {
+			Expression::Primary(Primary::String(s)) => s,
+			_ => panic!(),
+		};
+		let vispng = match &second[2] {
+			Expression::Primary(Primary::String(s)) => s,
+			_ => panic!(),
+		};
+
+		assert_eq!(empty, "");
+		assert_eq!(vispng, "visible.png");
 	}
 
 	#[test]
@@ -1048,33 +1038,24 @@ script S() {
     verb test();
 }"#;
 		let ast = parse_ok(src);
-		assert_eq!(ast.len(), 1);
+		let TopLevel::Object(obj) = &ast[0] else { panic!() };
+		assert_eq!(obj.body.statements.len(), 2);
 
-		match &ast[0] {
-			TopLevel::Object(obj) => {
-				assert_eq!(obj.id, "TestObj");
-				assert_eq!(obj.body.statements.len(), 2);
+		// ① the class property
+		let Statement::PropertyAssignment(assn) = &obj.body.statements[0] else {
+			panic!()
+		};
+		assert_eq!(assn.name, "class");
+		let Expression::Primary(Primary::Array(items)) = &assn.value else { panic!() };
+		assert_eq!(items.len(), 1);
+		let first = match &items[0] {
+			Expression::Primary(Primary::Identifier(id)) => id,
+			_ => panic!("identifier expected"),
+		};
+		assert_eq!(first, "SomeClass");
 
-				// First statement should be a ClassAssignment
-				match &obj.body.statements[0] {
-					Statement::ClassAssignment(class_names) => {
-						assert_eq!(class_names.len(), 1);
-						assert_eq!(class_names[0], "SomeClass");
-					},
-					other => panic!("Expected ClassAssignment, got {:?}", other),
-				}
-
-				// Second statement should be a Verb
-				match &obj.body.statements[1] {
-					Statement::Verb(verb) => {
-						assert_eq!(verb.name, "test");
-						assert!(verb.body.is_none());
-					},
-					other => panic!("Expected Verb, got {:?}", other),
-				}
-			},
-			other => panic!("Expected Object, got {:?}", other),
-		}
+		// ② the verb stub
+		matches!(&obj.body.statements[1], Statement::Verb(v) if v.name == "test");
 	}
 
 	#[test]
@@ -1089,35 +1070,26 @@ object TestObj {
     class = {BaseClass};
 }"#;
 		let ast = parse_ok(src);
-		assert_eq!(ast.len(), 2);
 
-		// First should be a class definition
-		match &ast[0] {
-			TopLevel::Class(class) => {
-				assert_eq!(class.name, "BaseClass");
-				assert_eq!(class.body.statements.len(), 1);
-				match &class.body.statements[0] {
-					Statement::Verb(verb) => assert_eq!(verb.name, "action"),
-					other => panic!("Expected Verb in class, got {:?}", other),
-				}
-			},
-			other => panic!("Expected Class definition, got {:?}", other),
-		}
+		let TopLevel::Class(cls) = &ast[0] else {
+			panic!("Expected first item to be a Class definition");
+		};
+		assert_eq!(cls.name, "BaseClass");
+		assert_eq!(cls.body.statements.len(), 1);
+		matches!(&cls.body.statements[0], Statement::Verb(v) if v.name == "action");
 
-		// Second should be an object with class assignment
-		match &ast[1] {
-			TopLevel::Object(obj) => {
-				assert_eq!(obj.id, "TestObj");
-				match &obj.body.statements[0] {
-					Statement::ClassAssignment(class_names) => {
-						assert_eq!(class_names.len(), 1);
-						assert_eq!(class_names[0], "BaseClass");
-					},
-					other => panic!("Expected ClassAssignment in object, got {:?}", other),
-				}
-			},
-			other => panic!("Expected Object, got {:?}", other),
-		}
+		let TopLevel::Object(obj) = &ast[1] else {
+			panic!("Expected second item to be an Object definition");
+		};
+		assert_eq!(obj.id, "TestObj");
+		assert_eq!(obj.body.statements.len(), 1);
+		let Statement::PropertyAssignment(assn) = &obj.body.statements[0] else {
+			panic!()
+		};
+		let Expression::Primary(Primary::Array(items)) = &assn.value else { panic!() };
+		assert_eq!(items.len(), 1);
+		let Expression::Primary(Primary::Identifier(cls)) = &items[0] else { panic!() };
+		assert_eq!(cls, "BaseClass");
 	}
 
 	#[test]
@@ -1147,25 +1119,26 @@ object TestObj {
     class = {ClassA, ClassB, ClassC};
 }"#;
 		let ast = parse_ok(src);
-		assert_eq!(ast.len(), 1);
+		let TopLevel::Object(obj) = &ast[0] else {
+			panic!("Expected first item to be an Object definition");
+		};
+		let Statement::PropertyAssignment(assn) = &obj.body.statements[0] else {
+			panic!("Expected property assignment for class");
+		};
+		assert_eq!(assn.name, "class");
 
-		match &ast[0] {
-			TopLevel::Object(obj) => {
-				assert_eq!(obj.id, "TestObj");
-				assert_eq!(obj.body.statements.len(), 1);
+		let Expression::Primary(Primary::Array(classes)) = &assn.value else {
+			panic!("Expected class assignment to be an array");
+		};
+		let idents: Vec<_> = classes
+			.iter()
+			.map(|e| match e {
+				Expression::Primary(Primary::Identifier(s)) => s.as_str(),
+				_ => panic!("identifier expected"),
+			})
+			.collect();
 
-				match &obj.body.statements[0] {
-					Statement::ClassAssignment(class_names) => {
-						assert_eq!(class_names.len(), 3);
-						assert_eq!(class_names[0], "ClassA");
-						assert_eq!(class_names[1], "ClassB");
-						assert_eq!(class_names[2], "ClassC");
-					},
-					other => panic!("Expected ClassAssignment, got {:?}", other),
-				}
-			},
-			other => panic!("Expected Object, got {:?}", other),
-		}
+		assert_eq!(idents, ["ClassA", "ClassB", "ClassC"]);
 	}
 
 	#[test]

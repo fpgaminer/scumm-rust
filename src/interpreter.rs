@@ -6,13 +6,12 @@ use std::{
 };
 
 use crate::ast::*;
-use futures::{FutureExt, future::LocalBoxFuture};
+use futures::{future::LocalBoxFuture, FutureExt};
 use indexmap::IndexMap;
 use log::{debug, error, info, warn};
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Document, Element, HtmlImageElement};
-
 
 pub enum Declaration {
 	Script(Block),
@@ -20,7 +19,6 @@ pub enum Declaration {
 	Class(ObjectDef),
 	Room(RoomDef),
 }
-
 
 // ---------------------------------------------------------------------------
 // Runtime object definition (built from the AST once at start-up)
@@ -56,7 +54,6 @@ impl Default for ObjectDef {
 	}
 }
 
-
 #[derive(Default)]
 pub struct RoomDef {
 	pub name: String,
@@ -85,7 +82,6 @@ impl From<&ObjectDef> for ObjectSnapshot {
 	}
 }
 
-
 /// SCUMM VM task context
 #[derive(Clone)]
 pub struct Ctx {
@@ -93,7 +89,6 @@ pub struct Ctx {
 	pub delay: Rc<RefCell<u32>>, // delay for blocking calls like wait()
 	pub interpreter: Interpreter,
 }
-
 
 // ---------------------------------------------------------------------------
 // Web interface for managing DOM
@@ -194,8 +189,6 @@ struct WebInterface {
 	game_container: Element,
 	room_container: Element,
 	inventory_container: Element,
-	container_width: f64,
-	container_height: f64,
 	current_room_image: Rc<RefCell<Option<String>>>,
 	scale_x: Rc<RefCell<f64>>,
 	scale_y: Rc<RefCell<f64>>,
@@ -208,14 +201,9 @@ impl WebInterface {
 		let window = web_sys::window().ok_or("No global `window` exists")?;
 		let document = window.document().ok_or("Should have a document on window")?;
 
-		// Define container dimensions
-		let container_width = 720.0;
-		let container_height = 480.0;
-
 		// Create main game container
 		let game_container = document.create_element("div")?;
 		game_container.set_attribute("id", "game-container")?;
-		game_container.set_attribute("style", &format!("width: {}px; height: {}px;", container_width, container_height))?;
 
 		// Create room container for objects
 		let room_container = document.create_element("div")?;
@@ -240,8 +228,6 @@ impl WebInterface {
 			game_container,
 			room_container,
 			inventory_container,
-			container_width,
-			container_height,
 			current_room_image: Rc::new(RefCell::new(None)),
 			scale_x: Rc::new(RefCell::new(1.0)),
 			scale_y: Rc::new(RefCell::new(1.0)),
@@ -255,6 +241,10 @@ impl WebInterface {
 	}
 
 	fn set_room_background(&self, image: Option<&str>) -> Result<(), JsValue> {
+		let rect = self.game_container.get_bounding_client_rect();
+		let container_width = rect.width();
+		let container_height = rect.height();
+
 		let style = if let Some(img) = image {
 			// Store the current room image path
 			*self.current_room_image.borrow_mut() = Some(img.to_string());
@@ -264,8 +254,6 @@ impl WebInterface {
 			let scale_x = self.scale_x.clone();
 			let scale_y = self.scale_y.clone();
 			let room_container = self.room_container.clone();
-			let container_width = self.container_width;
-			let container_height = self.container_height;
 			let image_element_clone = image_element.clone();
 
 			// Create a closure to handle image load
@@ -293,7 +281,7 @@ impl WebInterface {
 
 			format!(
 				"position: relative; width: {}px; height: {}px; background: #000 url('{}') no-repeat center/cover; margin: 0 auto; border: 2px solid #333;",
-				self.container_width, self.container_height, img
+				container_width, container_height, img
 			)
 		} else {
 			*self.current_room_image.borrow_mut() = None;
@@ -302,7 +290,7 @@ impl WebInterface {
 			self.room_container.set_attribute("style", "transform: scale(1, 1);")?;
 			format!(
 				"position: relative; width: {}px; height: {}px; background: #000; margin: 0 auto; border: 2px solid #333;",
-				self.container_width, self.container_height
+				container_width, container_height
 			)
 		};
 		self.game_container.set_attribute("style", &style)
@@ -716,7 +704,6 @@ impl WebInterface {
 	}
 }
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
 	Number(i32),
@@ -769,7 +756,6 @@ impl Value {
 	}
 }
 
-
 // ---------------------------------------------------------------------------
 // World model (super‑simple!)
 // ---------------------------------------------------------------------------
@@ -779,7 +765,6 @@ struct World {
 	current_room: u32,
 }
 
-
 type BuiltinFn = dyn for<'a> Fn(Vec<Value>, &'a Ctx) -> LocalBoxFuture<'a, Value>;
 type TaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
@@ -788,7 +773,6 @@ struct Task {
 	fut: TaskFuture,
 	ctx: Ctx,
 }
-
 
 #[derive(Clone)]
 pub struct Interpreter {
@@ -1036,7 +1020,6 @@ impl Interpreter {
 		Ok(())
 	}
 
-
 	fn render_room(&self, room_id: u32) -> Result<(), JsValue> {
 		self.web_interface.clear_room();
 
@@ -1169,7 +1152,6 @@ impl Interpreter {
 	}
 }
 
-
 // --------------------------------------------------
 // Built‑ins
 // --------------------------------------------------
@@ -1179,7 +1161,6 @@ where
 {
 	Rc::new(move |args, ctx| f(args, ctx))
 }
-
 
 fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	use Value::*;
@@ -1518,7 +1499,6 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 	builtins
 }
 
-
 #[derive(Debug)]
 #[must_use = "must await or poll this future"]
 pub struct YieldNow(bool);
@@ -1541,7 +1521,6 @@ pub fn yield_now() -> YieldNow {
 	YieldNow(false)
 }
 
-
 // ---------------------------------------------------------------------------
 // Convenience wrapper
 // ---------------------------------------------------------------------------
@@ -1562,7 +1541,6 @@ fn scumm_verb_to_user(verb: &str) -> String {
 	}
 	out
 }
-
 
 #[cfg(test)]
 mod tests {

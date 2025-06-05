@@ -131,7 +131,11 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let var_type = inner.next()?.as_str().to_string();
 			let name = inner.next()?.as_str().to_string();
 			let value = parse_expression(inner.next()?);
-			Some(Statement::VariableDeclaration(VariableDeclaration { var_type, name, value }))
+			Some(Statement::VariableDeclaration(VariableDeclaration {
+				var_type: var_type.parse().unwrap(),
+				name,
+				value,
+			}))
 		},
 		Rule::prop_assign => {
 			let mut inner = pair.into_inner();
@@ -500,7 +504,7 @@ fn init_logging() {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ast::{EqualityOp, FactorOp, TermOp};
+	use crate::ast::{EqualityOp, FactorOp, TermOp, VarType};
 	use std::fs;
 
 	fn parse_ok(src: &str) -> Vec<TopLevel> {
@@ -663,7 +667,7 @@ mod tests {
 		let ast = parse_ok(src);
 		if let TopLevel::Script(script) = &ast[0] {
 			if let Statement::VariableDeclaration(var) = &script.body.statements[0] {
-				assert_eq!(var.var_type, "string");
+				assert_eq!(var.var_type, VarType::String);
 				assert_eq!(var.name, "code");
 				if let Expression::Primary(Primary::FunctionCall(fc)) = &var.value {
 					assert_eq!(fc.name, "prompt");
@@ -897,14 +901,14 @@ script S() {
 			assert_eq!(script.body.statements.len(), 2);
 
 			if let Statement::VariableDeclaration(var) = &script.body.statements[0] {
-				assert_eq!(var.var_type, "int");
+				assert_eq!(var.var_type, VarType::Int);
 				assert!(matches!(var.value, Expression::Primary(Primary::Number(1))));
 			} else {
 				panic!("expected first variable declaration");
 			}
 
 			if let Statement::VariableDeclaration(var) = &script.body.statements[1] {
-				assert_eq!(var.var_type, "bool");
+				assert_eq!(var.var_type, VarType::Bool);
 				if let Expression::Primary(Primary::Identifier(id)) = &var.value {
 					assert_eq!(id, "false");
 				} else {

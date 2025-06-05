@@ -24,7 +24,8 @@ stmt        = _{ block | expr_stmt | control_stmt | var_decl }
 expr_stmt   =  { expr ~ ";" }
 control_stmt=  { if_stmt | while_stmt }
 verb_stmt   =  { "verb" ~ identifier ~ param_list ~ (";" | block) }
-var_decl    =  { identifier ~ identifier ~ "=" ~ expr ~ ";" }
+type_kw     =  { "int" | "bool" | "string" }
+var_decl    =  { type_kw ~ identifier ~ "=" ~ expr ~ ";" }
 prop_assign =  { identifier ~ "=" ~ expr ~ ";" }
 
 if_stmt     =  { "if" ~ "(" ~ expr ~ ")" ~ block ~ ("else" ~ (if_stmt | block))? }

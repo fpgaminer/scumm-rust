@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::interpreter::{Ctx, Declaration, Interpreter, ObjectDef, RoomDef, Value};
 use async_recursion::async_recursion;
 use log::warn;
@@ -274,8 +276,27 @@ pub struct VerbStatement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum VarType {
+	Int,
+	String,
+	Bool,
+}
+
+impl FromStr for VarType {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"int" => Ok(VarType::Int),
+			"string" => Ok(VarType::String),
+			"bool" => Ok(VarType::Bool),
+			_ => Err(()),
+		}
+	}
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct VariableDeclaration {
-	pub var_type: String,
+	pub var_type: VarType,
 	pub name: String,
 	pub value: Expression,
 }

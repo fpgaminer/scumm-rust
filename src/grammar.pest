@@ -11,12 +11,12 @@ file        =  { SOI ~ (item)* ~ EOI }
 item        =  { script_def | class_def | object_def | room_def }
 
 script_def  =  { "script" ~ identifier ~ param_list ~ block }
-class_def   =  { "class"  ~ identifier ~ def_block }
-object_def  =  { "object" ~ identifier ~ def_block }
-room_def    =  { "room" ~ identifier ~ room_block }
+class_def   =  { "class"  ~ identifier ~ body }
+object_def  =  { "object" ~ identifier ~ body }
+room_def    =  { "room" ~ identifier ~ body }
 
-def_block   =  { "{" ~ (verb_stmt | prop_assign)* ~ "}" }
-room_block  =  { "{" ~ (prop_assign | verb_stmt | object_def | script_def)* ~ "}" }
+body        = { "{" ~ body_item* ~ "}" }
+body_item   = _{ prop_assign | verb_stmt | object_def | script_def }
 
 block       =  { "{" ~ stmt* ~ "}" }
 stmt        = _{ block | expr_stmt | control_stmt | var_decl }
@@ -30,25 +30,25 @@ prop_assign =  { identifier ~ "=" ~ expr ~ ";" }
 if_stmt     =  { "if" ~ "(" ~ expr ~ ")" ~ block ~ ("else" ~ (if_stmt | block))? }
 while_stmt  =  { "while" ~ "(" ~ expr ~ ")" ~ block }
 
-expr        =  _{ assignment }
-assignment  =  { logical_or ~ ("=" ~ assignment)? }
-logical_or_op = { "||" }
-logical_and_op = { "&&" }
-logical_or  =  { logical_and ~ (logical_or_op ~ logical_or)? }
-logical_and =  { equality ~ (logical_and_op ~ logical_and)? }
-equality    =  { comparison ~ (eq_op ~ equality)? }
-comparison  =  { term ~ (cmp_op ~ comparison)? }
-term        =  { factor ~ (add_op ~ term)? }
-factor      =  { unary ~ (mul_op ~ factor)? }
-eq_op       = { "==" | "!=" }
-cmp_op      = { "<=" | ">=" | "<" | ">" }
-add_op      = { "+" | "-" }
-mul_op      = { "*" | "/" }
-unary       =  { ("!" | "-")* ~ primary }
-primary     =  { array_literal | func_call | number | string | identifier | "(" ~ expr ~ ")" }
-func_call   =  { identifier ~ "(" ~ arg_list? ~ ")" }
-arg_list    =  { expr ~ ("," ~ expr)* }
-array_literal = { "{" ~ (expr ~ ("," ~ expr)* ~ ("," )?)? ~ "}" }
+expr           =  _{ assignment }
+assignment     =  { logical_or ~ ("=" ~ assignment)? }
+logical_or_op  =  { "||" }
+logical_and_op =  { "&&" }
+logical_or     =  { logical_and ~ (logical_or_op ~ logical_or)? }
+logical_and    =  { equality ~ (logical_and_op ~ logical_and)? }
+equality       =  { comparison ~ (eq_op ~ equality)? }
+comparison     =  { term ~ (cmp_op ~ comparison)? }
+term           =  { factor ~ (add_op ~ term)? }
+factor         =  { unary ~ (mul_op ~ factor)? }
+eq_op          =  { "==" | "!=" }
+cmp_op         =  { "<=" | ">=" | "<" | ">" }
+add_op         =  { "+" | "-" }
+mul_op         =  { "*" | "/" }
+unary          =  { ("!" | "-")* ~ primary }
+primary        =  { array_literal | func_call | number | string | identifier | "(" ~ expr ~ ")" }
+func_call      =  { identifier ~ "(" ~ arg_list? ~ ")" }
+arg_list       =  { expr ~ ("," ~ expr)* }
+array_literal  =  { "{" ~ (expr ~ ("," ~ expr)* ~ ("," )?)? ~ "}" }
 
-param_list  =  { "(" ~ (param ~ ("," ~ param)*)? ~ ")" }
-param       =  { identifier ~ identifier }
+param_list     =  { "(" ~ (param ~ ("," ~ param)*)? ~ ")" }
+param          =  { identifier ~ identifier }

@@ -1920,4 +1920,56 @@ script main() { startRoom(R); }
 		let objects = interp.web_interface.get_objects();
 		assert_eq!(objects[&key_id].state, 2);
 	}
+
+	#[test]
+	fn unary_not_and_negate_work() {
+		// -5 comes from a unary Negate, while !0 / !1 exercise unary Not + truthiness
+		let vars = run_script(
+			r#"
+			script main() {
+				int  a = -5;
+				bool t = !0;
+				bool f = !1;
+			}
+			"#,
+		);
+		assert_eq!(vars.get("a"), Some(&Value::Number(-5)));
+		assert_eq!(vars.get("t"), Some(&Value::Bool(true))); // !0  ->  true
+		assert_eq!(vars.get("f"), Some(&Value::Bool(false))); // !1  ->  false
+	}
+
+	#[test]
+	fn class_inherited_verb_executes() {
+		let src = r#"
+			class DoorOpener {
+				// inherited verb – sets state to 2
+				verb vOpen(int this, int that) { setState(this, 2); }
+			}
+
+			object Safe {
+				state  = 1;
+				// two visible states so that setState(2) is valid
+				states = { {0,0,""}, {0,0,""} };
+				class  = {DoorOpener};
+			}
+		"#;
+
+		let ast = crate::parse_str(src).expect("parse failed");
+		let interp = Interpreter::new(&ast);
+		let safe_id = interp.declarations.borrow().get_index_of("Safe").unwrap() as u32;
+
+		// run inherited verb
+		assert!(interp.run_verb(safe_id, "vOpen", None));
+
+		// tick until idle
+		for _ in 0..16 {
+			if interp.run_queue.borrow().is_empty() {
+				break;
+			}
+			interp.tick_web();
+		}
+
+		let new_state = interp.with_object_by_id(safe_id, |o| o.state).unwrap();
+		assert_eq!(new_state, 2, "inherited verb should have changed the state");
+	}
 }

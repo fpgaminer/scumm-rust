@@ -1163,4 +1163,14 @@ object TestObj {
 			other => panic!("Expected Object, got {:?}", other),
 		}
 	}
+
+	#[test]
+	fn script_with_parameters_parses() {
+		let _ast = crate::parse_str(
+			r#"script Compute(int x, int y) {
+					int z = x + y;
+			}"#,
+		)
+		.expect("parameterised script should parse");
+	}
 }

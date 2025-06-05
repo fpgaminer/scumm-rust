@@ -387,7 +387,12 @@ pub fn parse_str(input: &str) -> Result<Vec<TopLevel>> {
 
 
 pub async fn load_script_raw() -> Result<String, JsValue> {
-	let resp_value = JsFuture::from(window().fetch_with_str("/example.sc")).await?;
+	let window = window();
+	let location = window.location();
+	let hash = location.hash().unwrap_or_default();
+	let script = hash.strip_prefix('#').filter(|s| !s.is_empty()).unwrap_or("example.sc");
+	let url = format!("/{}", script);
+	let resp_value = JsFuture::from(window.fetch_with_str(&url)).await?;
 
 	let resp: Response = resp_value.dyn_into()?;
 	let text = JsFuture::from(resp.text()?).await?;

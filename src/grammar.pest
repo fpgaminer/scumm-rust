@@ -32,12 +32,14 @@ while_stmt  =  { "while" ~ "(" ~ expr ~ ")" ~ block }
 
 expr        =  _{ assignment }
 assignment  =  { logical_or ~ ("=" ~ assignment)? }
-logical_or  =  { logical_and ~ ("||" ~ logical_and)* }
-logical_and =  { equality ~ ("&&" ~ equality)* }
-equality    =  { comparison ~ (eq_op ~ comparison)* }
-comparison  =  { term ~ (cmp_op ~ term)* }
-term        =  { factor ~ (add_op ~ factor)* }
-factor      =  { unary ~ (mul_op ~ unary)* }
+logical_or_op = { "||" }
+logical_and_op = { "&&" }
+logical_or  =  { logical_and ~ (logical_or_op ~ logical_or)? }
+logical_and =  { equality ~ (logical_and_op ~ logical_and)? }
+equality    =  { comparison ~ (eq_op ~ equality)? }
+comparison  =  { term ~ (cmp_op ~ comparison)? }
+term        =  { factor ~ (add_op ~ term)? }
+factor      =  { unary ~ (mul_op ~ factor)? }
 eq_op       = { "==" | "!=" }
 cmp_op      = { "<=" | ">=" | "<" | ">" }
 add_op      = { "+" | "-" }

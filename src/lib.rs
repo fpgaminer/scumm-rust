@@ -21,8 +21,8 @@ struct ScummParser;
 
 use pest::iterators::Pair;
 
-fn unquote(raw: &str) -> String {
-        raw[1..raw.len() - 1].to_string()
+fn unquote(raw: &str) -> &str {
+	&raw[1..raw.len() - 1]
 }
 
 fn parse_block(pair: Pair<Rule>) -> Block {
@@ -140,12 +140,12 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 			let mut inner = pair.into_inner();
 			let name = inner.next()?.as_str().to_string();
 			let value_pair = inner.next()?;
-                        let value = match value_pair.as_rule() {
-                                Rule::number => PropertyValue::Number(value_pair.as_str().parse().ok()?),
-                                Rule::string => PropertyValue::String(unquote(value_pair.as_str())),
-                                Rule::identifier => PropertyValue::Identifier(value_pair.as_str().to_string()),
-                                _ => return None,
-                        };
+			let value = match value_pair.as_rule() {
+				Rule::number => PropertyValue::Number(value_pair.as_str().parse().ok()?),
+				Rule::string => PropertyValue::String(unquote(value_pair.as_str()).to_string()),
+				Rule::identifier => PropertyValue::Identifier(value_pair.as_str().to_string()),
+				_ => return None,
+			};
 			Some(Statement::PropertyAssignment(PropertyAssignment { name, value }))
 		},
 		Rule::class_assign => {
@@ -187,11 +187,11 @@ fn parse_statement(pair: Pair<Rule>) -> Option<Statement> {
 					let x: i32 = ei.next()?.as_str().parse().ok()?;
 					let y: i32 = ei.next()?.as_str().parse().ok()?;
 					let img_pair = ei.next()?;
-                                        let image = match img_pair.as_rule() {
-                                                Rule::string => unquote(img_pair.as_str()),
-                                                Rule::empty_string => String::new(), // Empty string for no graphics
-                                                _ => return None,
-                                        };
+					let image = match img_pair.as_rule() {
+						Rule::string => unquote(img_pair.as_str()).to_string(),
+						Rule::empty_string => String::new(), // Empty string for no graphics
+						_ => return None,
+					};
 					states.push(StateEntry { x, y, image });
 				}
 				Some(Statement::States(states))
@@ -316,7 +316,7 @@ fn parse_expression(pair: Pair<Rule>) -> Expression {
 fn parse_primary(pair: Pair<Rule>) -> Primary {
 	match pair.as_rule() {
 		Rule::number => Primary::Number(pair.as_str().parse().unwrap_or(0)),
-                Rule::string => Primary::String(unquote(pair.as_str())),
+		Rule::string => Primary::String(unquote(pair.as_str()).to_string()),
 		Rule::identifier => Primary::Identifier(pair.as_str().to_string()),
 		Rule::func_call => {
 			let mut inner = pair.into_inner();

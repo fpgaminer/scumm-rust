@@ -995,6 +995,15 @@ impl Interpreter {
 		}
 	}
 
+	fn add_to_inventory(&self, id: u32) {
+		self.world.borrow_mut().inventory.insert(id);
+		self.with_object_by_id_mut(id, |o| o.room = 0);
+	}
+
+	fn show_message(&self, message: &str) {
+		self.web_interface.display_message(message).unwrap_or_else(|_| info!("{}", message));
+	}
+
 	// --------------------------------------------------
 	// Web-specific tick method
 	// Performs a single tick of the interpreter
@@ -1300,10 +1309,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 				if args.len() >= 2 {
 					let txt = args[1].as_string();
 					let message = txt.trim_matches('"');
-
-					ctx.interpreter.web_interface.display_message(message).unwrap_or_else(|_| {
-						info!("{}", message);
-					});
+					ctx.interpreter.show_message(message);
 				}
 				Null
 			}
@@ -1318,10 +1324,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 				if let Some(arg) = args.first() {
 					let txt = arg.as_string();
 					let message = txt.trim_matches('"');
-
-					ctx.interpreter.web_interface.display_message(message).unwrap_or_else(|_| {
-						info!("{}", message);
-					});
+					ctx.interpreter.show_message(message);
 				}
 				Null
 			}
@@ -1524,8 +1527,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 			async move {
 				if let Some(obj) = args.first() {
 					let id = ctx.interpreter.to_id(obj);
-					ctx.interpreter.world.borrow_mut().inventory.insert(id);
-					ctx.interpreter.with_object_by_id_mut(id, |o| o.room = 0);
+					ctx.interpreter.add_to_inventory(id);
 					debug!("[inventory] added object {id}");
 				}
 				Null
@@ -1540,8 +1542,7 @@ fn build_builtins() -> HashMap<String, Rc<BuiltinFn>> {
 			async move {
 				if let Some(obj) = args.first() {
 					let id = ctx.interpreter.to_id(obj);
-					ctx.interpreter.world.borrow_mut().inventory.insert(id);
-					ctx.interpreter.with_object_by_id_mut(id, |o| o.room = 0);
+					ctx.interpreter.add_to_inventory(id);
 					debug!("[inventory] picked up object {id}");
 				}
 				Null

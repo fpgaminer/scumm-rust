@@ -90,10 +90,10 @@ room Arbeitszimmer
     /*** Türgriff (appears only after safe opened) ***/
     object ObjTuergriff
     {
-        x = 0;
-        y = 0;
-        w = 64;
-        h = 64;
+        x = 930;
+        y = 750;
+        w = 96;
+        h = 96;
         name = "Türgriff";
         state = 0;  // initially hidden
         states = [
@@ -139,8 +139,8 @@ room Arbeitszimmer
     /*** Notiz ***/
     object OBJ_NOTIZ
     {
-        x = 0;
-        y = 0;
+        x = 250;
+        y = 681;
         w = 100;
         h = 100;
         name = "Notiz";
@@ -200,7 +200,7 @@ room Arbeitszimmer
     object OBJ_SCHLUESSEL
     {
         x = 1335;
-        y = 40;
+        y = 355;
         w = 50;
         h = 26;
         name = "Schlüssel";

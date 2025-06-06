@@ -25,7 +25,8 @@ a:hover {
 body {
   margin: 0;
   display: flex;
-  place-items: center;
+  flex-direction: column;
+  align-items: center;
   min-width: 320px;
   min-height: 100vh;
   background: #222;
@@ -463,4 +464,73 @@ button:focus-visible {
   color: #ffff00;
   text-shadow: 0 0 4px #ffff88;
   transform: translateY(-50%) translateX(2px);
+}
+
+/* Game Instructions - Retro SCUMM style */
+#game-instructions {
+  max-width: 720px;
+  margin: 20px auto;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 50%, #0f0f0f 100%);
+  color: #e8e8e8;
+  border: 3px solid;
+  border-color: #666 #333 #333 #666; /* Classic raised 3D border */
+  padding: 16px 20px;
+  font-family: 'Courier New', 'Lucida Console', monospace;
+  font-size: 13px;
+  font-weight: bold;
+  text-shadow: 1px 1px 0px rgba(0, 0, 0, 0.8);
+  box-shadow: 
+    3px 3px 0px #000,
+    6px 6px 12px rgba(0, 0, 0, 0.8),
+    inset 1px 1px 0px rgba(255, 255, 255, 0.15),
+    inset -1px -1px 0px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  position: relative;
+}
+
+#game-instructions::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.02) 1px, transparent 0),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0px,
+      rgba(0, 255, 0, 0.01) 1px,
+      transparent 2px
+    );
+  background-size: 3px 3px, 100% 2px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#game-instructions h3 {
+  margin: 0 0 12px 0;
+  color: #ffff88;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  text-shadow: 
+    0 0 4px #ffff88,
+    1px 1px 0px rgba(0, 0, 0, 0.9);
+  position: relative;
+  z-index: 2;
+}
+
+#game-instructions p {
+  margin: 8px 0;
+  line-height: 1.4;
+  position: relative;
+  z-index: 2;
+}
+
+#game-instructions strong {
+  color: #88ffff;
+  text-shadow: 
+    0 0 3px #88ffff,
+    1px 1px 0px rgba(0, 0, 0, 0.9);
 }
